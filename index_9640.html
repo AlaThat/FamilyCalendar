@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Our Week</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap" rel="stylesheet">
+
+<!-- Firebase (compat build so this works with zero build step, on old Safari) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+
+<style>
+  :root{
+    --paper: #F6F1E4;
+    --paper-line: #E4DBC4;
+    --ink: #2C2A24;
+    --ink-soft: #6B6656;
+    --accent: #B5542C;
+    --white: #FFFDF8;
+    --shadow: 0 1px 0 rgba(44,42,36,0.08);
+    --radius: 10px;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0; height:100%;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overflow-x: hidden;
+  }
+  .display-num{ font-family: "Fraunces", Georgia, serif; }
+
+  /* ---------- App shell ---------- */
+  #app{ display:flex; flex-direction:column; height:100vh; }
+
+  header.topbar{
+    display:flex; align-items:baseline; justify-content:space-between;
+    padding: 18px 24px 10px;
+    border-bottom: 1px solid var(--paper-line);
+    flex-shrink:0;
+  }
+  header.topbar h1{
+    font-family:"Fraunces", Georgia, serif;
+    font-weight:600; font-size: 28px; margin:0;
+  }
+  header.topbar .today-str{ color: var(--ink-soft); font-size:15px; }
+
+  nav.tabs{
+    display:flex; gap:4px; padding: 10px 20px 0;
+    border-bottom: 1px solid var(--paper-line);
+    flex-shrink:0;
+  }
+  nav.tabs button{
+    appearance:none; border:none; background:none; cursor:pointer;
+    font-size:16px; padding: 10px 16px; color: var(--ink-soft);
+    border-bottom: 3px solid transparent; font-weight:600;
+    font-family:inherit;
+  }
+  nav.tabs button.active{ color: var(--ink); border-bottom-color: var(--accent); }
+
+  main{ flex:1; overflow-y:auto; padding: 20px 24px 60px; }
+
+  .hidden{ display:none !important; }
+
+  /* ---------- Family strip ---------- */
+  .family-strip{ display:flex; gap:14px; flex-wrap:wrap; margin-bottom:22px; }
+  .chip{
+    display:flex; align-items:center; gap:8px;
+    background: var(--white); border:1px solid var(--paper-line);
+    border-radius: 999px; padding:6px 14px 6px 6px;
+    font-weight:600; font-size:14px;
+  }
+  .dot{ width:22px; height:22px; border-radius:50%; flex-shrink:0; }
+
+  /* ---------- Today tab ---------- */
+  .section-title{
+    font-family:"Fraunces", Georgia, serif; font-weight:600;
+    font-size:20px; margin: 26px 0 12px;
+  }
+  .section-title:first-child{ margin-top:0; }
+
+  .member-column{
+    display:grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr));
+    gap:16px;
+  }
+  .member-card{
+    background: var(--white); border:1px solid var(--paper-line);
+    border-radius: var(--radius); padding:16px; border-top: 6px solid #ccc;
+  }
+  .member-card h3{ margin:0 0 10px; font-size:17px; display:flex; align-items:center; gap:8px; }
+  .routine-item, .chore-item{
+    display:flex; align-items:center; gap:12px;
+    padding: 10px 4px; border-bottom:1px solid var(--paper-line);
+    font-size: 16px;
+  }
+  .routine-item:last-child, .chore-item:last-child{ border-bottom:none; }
+  .check-btn{
+    width:34px; height:34px; border-radius:8px; flex-shrink:0;
+    border:2px solid var(--ink-soft); background:var(--white);
+    display:flex; align-items:center; justify-content:center;
+    font-size:20px; cursor:pointer;
+  }
+  .check-btn.done{ background: var(--ink); border-color: var(--ink); color: var(--white); }
+  .item-icon{ font-size:22px; width:26px; text-align:center; }
+  .item-label{ flex:1; }
+  .empty-note{ color: var(--ink-soft); font-size:14px; padding:8px 4px; }
+
+  /* ---------- Chores / pool ---------- */
+  .pool-grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap:14px; }
+  .pool-card{
+    background: var(--white); border:1px solid var(--paper-line); border-radius: var(--radius);
+    padding:16px; display:flex; flex-direction:column; gap:10px;
+  }
+  .pool-card .amount{ font-family:"Fraunces",serif; font-size:24px; font-weight:600; color: var(--accent); }
+  .claim-row{ display:flex; gap:8px; flex-wrap:wrap; }
+  .claim-btn{
+    border:none; border-radius:999px; padding:8px 14px; font-weight:600; cursor:pointer;
+    color:white; font-size:14px;
+  }
+  .status-pill{ font-size:13px; font-weight:600; color: var(--ink-soft); }
+
+  .earnings-strip{ display:flex; gap:16px; flex-wrap:wrap; margin-top:8px; }
+  .earnings-card{
+    background: var(--white); border:1px solid var(--paper-line); border-radius: var(--radius);
+    padding:14px 18px; min-width:180px;
+  }
+  .earnings-card .amt{ font-family:"Fraunces",serif; font-size:26px; font-weight:600; }
+  .mark-paid-btn{
+    margin-top:8px; font-size:13px; border:1px solid var(--ink-soft); background:none;
+    border-radius:8px; padding:6px 10px; cursor:pointer;
+  }
+
+  /* ---------- Calendar tab ---------- */
+  .cal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+  .cal-header h2{ font-family:"Fraunces",serif; font-weight:600; font-size:24px; margin:0; }
+  .cal-nav-btn{
+    border:1px solid var(--paper-line); background:var(--white); border-radius:8px;
+    width:38px; height:38px; font-size:18px; cursor:pointer;
+  }
+  .cal-grid{ display:grid; grid-template-columns: repeat(7, 1fr); gap:6px; }
+  .cal-dow{ text-align:center; font-size:12px; color:var(--ink-soft); font-weight:700; padding-bottom:4px; }
+  .cal-cell{
+    background: var(--white); border:1px solid var(--paper-line); border-radius:8px;
+    min-height:90px; padding:6px; cursor:pointer; display:flex; flex-direction:column; gap:4px;
+  }
+  .cal-cell.other-month{ opacity:0.35; }
+  .cal-cell.today{ border-color: var(--accent); border-width:2px; }
+  .cal-date-num{ font-family:"Fraunces",serif; font-weight:600; font-size:15px; }
+  .cal-evt{
+    font-size:11px; padding:2px 5px; border-radius:5px; color:white; font-weight:600;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+
+  /* ---------- Modal ---------- */
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(44,42,36,0.45);
+    display:flex; align-items:center; justify-content:center; z-index:50; padding:20px;
+  }
+  .modal{
+    background: var(--white); border-radius: 14px; padding:22px; width:100%; max-width:440px;
+    max-height:85vh; overflow-y:auto;
+  }
+  .modal h3{ font-family:"Fraunces",serif; margin-top:0; }
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-size:13px; font-weight:700; margin-bottom:5px; color:var(--ink-soft); }
+  .field input[type=text], .field input[type=date], .field input[type=time], .field input[type=number], .field select, .field textarea{
+    width:100%; padding:10px; border:1px solid var(--paper-line); border-radius:8px; font-size:15px;
+    font-family:inherit; background: var(--paper);
+  }
+  .checkbox-row{ display:flex; align-items:center; gap:8px; font-size:15px; }
+  .assignee-toggles{ display:flex; gap:8px; flex-wrap:wrap; }
+  .assignee-toggle{
+    padding:7px 12px; border-radius:999px; border:2px solid var(--paper-line); cursor:pointer;
+    font-size:14px; font-weight:600; background:var(--white);
+  }
+  .assignee-toggle.on{ color:white; border-color:transparent; }
+  .modal-actions{ display:flex; gap:10px; margin-top:18px; }
+  .btn{
+    border:none; border-radius:8px; padding:11px 18px; font-weight:700; cursor:pointer; font-size:15px;
+    font-family:inherit;
+  }
+  .btn-primary{ background: var(--ink); color:white; }
+  .btn-secondary{ background: var(--paper); border:1px solid var(--paper-line); }
+  .btn-danger{ background:#fff; color:#B5342C; border:1px solid #B5342C; }
+  .close-x{ float:right; background:none; border:none; font-size:20px; cursor:pointer; color:var(--ink-soft); }
+
+  /* ---------- Settings tab ---------- */
+  .settings-block{ margin-bottom:32px; }
+  .list-row{
+    display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--paper-line);
+  }
+  .list-row .grow{ flex:1; }
+  .small-btn{
+    border:1px solid var(--paper-line); background:var(--white); border-radius:6px;
+    padding:5px 10px; font-size:13px; cursor:pointer;
+  }
+  .add-row-btn{
+    margin-top:10px; background:none; border:1px dashed var(--ink-soft); border-radius:8px;
+    padding:10px; width:100%; cursor:pointer; font-weight:600; color:var(--ink-soft); font-size:15px;
+  }
+  .config-warning{
+    background:#FCEFE4; border:1px solid #E8B98C; border-radius:10px; padding:14px 16px;
+    font-size:14px; margin-bottom:18px; line-height:1.5;
+  }
+
+  @media (max-width: 640px){
+    header.topbar h1{ font-size:22px; }
+    main{ padding: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header class="topbar">
+    <h1>Our Week</h1>
+    <div class="today-str" id="todayStr"></div>
+  </header>
+
+  <nav class="tabs">
+    <button data-tab="today" class="active">Today</button>
+    <button data-tab="calendar">Calendar</button>
+    <button data-tab="chores">Chores</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
+
+  <main>
+    <div id="configWarning" class="config-warning hidden">
+      This app isn't connected to a database yet. Open <code>index.html</code> and fill in the
+      <code>firebaseConfig</code> section near the bottom with your own free Firebase project's keys
+      (see SETUP.md). Until then, nothing you add here will be saved or synced.
+    </div>
+
+    <!-- TODAY -->
+    <section id="tab-today">
+      <div class="family-strip" id="familyStrip"></div>
+      <div class="section-title">Routines</div>
+      <div class="member-column" id="routineColumns"></div>
+      <div class="section-title">Today's chores</div>
+      <div class="member-column" id="choreColumns"></div>
+    </section>
+
+    <!-- CALENDAR -->
+    <section id="tab-calendar" class="hidden">
+      <div class="cal-header">
+        <button class="cal-nav-btn" id="calPrev">‹</button>
+        <h2 id="calMonthLabel"></h2>
+        <button class="cal-nav-btn" id="calNext">›</button>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+    </section>
+
+    <!-- CHORES (full board) -->
+    <section id="tab-chores" class="hidden">
+      <div class="section-title">Up for grabs</div>
+      <div class="pool-grid" id="poolGrid"></div>
+      <div class="section-title">Earnings this pay period</div>
+      <div class="earnings-strip" id="earningsStrip"></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="hidden">
+      <div class="settings-block">
+        <div class="section-title">Family members</div>
+        <div id="familyList"></div>
+        <button class="add-row-btn" id="addFamilyBtn">+ Add family member</button>
+      </div>
+      <div class="settings-block">
+        <div class="section-title">Daily routines</div>
+        <div id="routineList"></div>
+        <button class="add-row-btn" id="addRoutineBtn">+ Add routine</button>
+      </div>
+      <div class="settings-block">
+        <div class="section-title">Chores</div>
+        <div id="choreList"></div>
+        <button class="add-row-btn" id="addChoreBtn">+ Add chore</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+/* ============================================================
+   FIREBASE CONFIG — replace with your own free project's keys.
+   Firebase Console -> Project settings -> General -> Your apps -> SDK setup
+   ============================================================ */
+const firebaseConfig = {
+ apiKey: "AIzaSyBO19dkQdmTS6qnoCcZhlwl2OuJZJVkAnE",
+ authDomain: "familycalendar-34b6c.firebaseapp.com",
+ projectId: "familycalendar-34b6c",
+ storageBucket: "familycalendar-34b6c.firebasestorage.app",
+ messagingSenderId: "561250695738",
+ appId: "1:561250695738:web:970b517bfe61ba3db89303"
+};
+
+/* ============================================================
+   EMAILJS CONFIG — used only for the "Add to work calendar" box.
+   Leave blank to disable that feature safely.
+   See SETUP.md for how to get these three values (free tier).
+   ============================================================ */
+const emailjsConfig = {
+  publicKey: "",
+  serviceId: "",
+  templateId: ""   // template should just include {{subject}} and {{body}} fields
+};
+
+let db = null;
+let firebaseReady = false;
+try{
+  if(firebaseConfig.apiKey !== "AIzaSyBO19dkQdmTS6qnoCcZhlwl2OuJZJVkAnE"){
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+    firebaseReady = true;
+  }
+}catch(e){ console.error("Firebase init failed", e); }
+
+if(!firebaseReady){
+  document.getElementById('configWarning').classList.remove('hidden');
+}
+
+/* ---------------- In-memory state (mirrors Firestore) ---------------- */
+const state = {
+  family: [],       // {id, name, role, color}
+  routines: [],      // {id, title, icon, schedule, assignedTo:[]}
+  routineLog: {},     // key `${date}_${routineId}_${memberId}` -> true/false
+  chores: [],        // {id, title, icon, type, assignedTo, value, claimedBy, status}
+  earnings: [],       // {id, memberId, amount, title, date, paid}
+  events: []          // {id, title, date, startTime, endTime, assignees:[], workBlock, tag}
+};
+
+const todayISO = () => new Date().toISOString().slice(0,10);
+const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function fmtDateHeader(d){
+  return d.toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' });
+}
+document.getElementById('todayStr').textContent = fmtDateHeader(new Date());
+
+function memberById(id){ return state.family.find(m => m.id === id); }
+function colorOf(id){ const m = memberById(id); return m ? m.color : '#999'; }
+
+/* ---------------- Firestore wiring (only if configured) ---------------- */
+function watchCollection(name, cb){
+  if(!firebaseReady) return;
+  db.collection(name).onSnapshot(snap => {
+    const rows = [];
+    snap.forEach(doc => rows.push({ id: doc.id, ...doc.data() }));
+    cb(rows);
+  });
+}
+
+function initFirestoreListeners(){
+  watchCollection('family', rows => { state.family = rows.sort((a,b)=> (a.order||0)-(b.order||0)); renderAll(); });
+  watchCollection('routines', rows => { state.routines = rows; renderAll(); });
+  watchCollection('chores', rows => { state.chores = rows; renderAll(); });
+  watchCollection('events', rows => { state.events = rows; renderAll(); });
+  watchCollection('earnings', rows => { state.earnings = rows; renderAll(); });
+  db.collection('routineLog').where('date','==', todayISO()).onSnapshot(snap=>{
+    state.routineLog = {};
+    snap.forEach(doc=>{ const d = doc.data(); state.routineLog[`${d.date}_${d.routineId}_${d.memberId}`] = d.done; });
+    renderAll();
+  });
+}
+if(firebaseReady) initFirestoreListeners();
+
+/* ---------------- Demo fallback data (only shown if not configured) --------------- */
+if(!firebaseReady){
+  state.family = [
+    {id:'ala', name:'Ala', role:'parent', color:'#2F5233', order:0},
+    {id:'christian', name:'Christian', role:'parent', color:'#1F3A5F', order:1},
+    {id:'lily', name:'Lily', role:'child', color:'#C0392B', order:2},
+    {id:'hazel', name:'Hazel', role:'child', color:'#D4A017', order:3},
+  ];
+  state.routines = [
+    {id:'r1', title:'Make bed', icon:'🛏️', schedule:'daily', assignedTo:['lily','hazel']},
+    {id:'r2', title:'Brush teeth', icon:'🪥', schedule:'daily', assignedTo:['lily','hazel']},
+    {id:'r3', title:'Tidy living room', icon:'🧸', schedule:'daily', assignedTo:['lily','hazel']},
+  ];
+  state.chores = [
+    {id:'c1', title:'Load dishwasher', icon:'🍽️', type:'pool', value:1, status:'open'},
+    {id:'c2', title:'Feed the dog', icon:'🐕', type:'pool', value:1, status:'open'},
+  ];
+}
+
+/* ============================== RENDER: TODAY ============================== */
+function renderFamilyStrip(){
+  const el = document.getElementById('familyStrip');
+  el.innerHTML = state.family.map(m => `
+    <div class="chip"><span class="dot" style="background:${m.color}"></span>${m.name}</div>
+  `).join('');
+}
+
+function routineAppliesToday(r){
+  const dow = new Date().getDay(); // 0 Sun .. 6 Sat
+  if(r.schedule === 'daily') return true;
+  if(r.schedule === 'weekday') return dow >=1 && dow <=5;
+  if(r.schedule === 'weekend') return dow === 0 || dow === 6;
+  return true;
+}
+
+function renderRoutineColumns(){
+  const el = document.getElementById('routineColumns');
+  const kids = state.family.filter(m => m.role === 'child');
+  if(kids.length === 0){ el.innerHTML = '<div class="empty-note">Add family members in Settings to see routines here.</div>'; return; }
+  el.innerHTML = kids.map(kid => {
+    const items = state.routines.filter(r => routineAppliesToday(r) && (r.assignedTo||[]).includes(kid.id));
+    const rows = items.length ? items.map(r => {
+      const key = `${todayISO()}_${r.id}_${kid.id}`;
+      const done = !!state.routineLog[key];
+      return `<div class="routine-item">
+        <div class="check-btn ${done?'done':''}" data-routine="${r.id}" data-member="${kid.id}">${done?'✓':''}</div>
+        <div class="item-icon">${r.icon||'⭐'}</div>
+        <div class="item-label">${r.title}</div>
+      </div>`;
+    }).join('') : '<div class="empty-note">No routines assigned yet.</div>';
+    return `<div class="member-card" style="border-top-color:${kid.color}">
+      <h3><span class="dot" style="width:16px;height:16px;background:${kid.color}"></span>${kid.name}</h3>
+      ${rows}
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('.check-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=> toggleRoutine(btn.dataset.routine, btn.dataset.member));
+  });
+}
+
+function toggleRoutine(routineId, memberId){
+  const key = `${todayISO()}_${routineId}_${memberId}`;
+  const newVal = !state.routineLog[key];
+  state.routineLog[key] = newVal;
+  renderRoutineColumns();
+  if(firebaseReady){
+    db.collection('routineLog').doc(key).set({ date: todayISO(), routineId, memberId, done: newVal });
+  }
+}
+
+function renderChoreColumns(){
+  const el = document.getElementById('choreColumns');
+  const kids = state.family.filter(m => m.role === 'child');
+  const assigned = state.chores.filter(c => c.type === 'assigned');
+  if(kids.length === 0 || assigned.length === 0){
+    el.innerHTML = '<div class="empty-note">No assigned chores yet — add some in Settings, or check the Chores tab for the up-for-grabs pool.</div>';
+    return;
+  }
+  el.innerHTML = kids.map(kid => {
+    const items = assigned.filter(c => c.assignedTo === kid.id);
+    if(!items.length) return '';
+    const rows = items.map(c => `<div class="chore-item">
+        <div class="check-btn ${c.status==='done'?'done':''}" data-chore="${c.id}">${c.status==='done'?'✓':''}</div>
+        <div class="item-icon">${c.icon||'🧹'}</div>
+        <div class="item-label">${c.title}</div>
+      </div>`).join('');
+    return `<div class="member-card" style="border-top-color:${kid.color}">
+      <h3><span class="dot" style="width:16px;height:16px;background:${kid.color}"></span>${kid.name}</h3>
+      ${rows}
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('.check-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=> toggleChoreDone(btn.dataset.chore));
+  });
+}
+
+function toggleChoreDone(choreId){
+  const c = state.chores.find(x=>x.id===choreId);
+  if(!c) return;
+  const newStatus = c.status === 'done' ? 'open' : 'done';
+  c.status = newStatus;
+  renderChoreColumns();
+  if(firebaseReady) db.collection('chores').doc(choreId).update({ status: newStatus });
+}
+
+/* ============================== RENDER: CHORES / POOL ============================== */
+function renderPool(){
+  const el = document.getElementById('poolGrid');
+  const pool = state.chores.filter(c => c.type === 'pool');
+  if(!pool.length){ el.innerHTML = '<div class="empty-note">No pool chores yet — add some in Settings.</div>'; return; }
+  const kids = state.family.filter(m=>m.role==='child');
+  el.innerHTML = pool.map(c => {
+    const claimedByM = c.claimedBy ? memberById(c.claimedBy) : null;
+    let body;
+    if(c.status === 'done'){
+      body = `<span class="status-pill">Done by ${claimedByM?claimedByM.name:'someone'} ✓</span>`;
+    } else if(c.status === 'claimed' && claimedByM){
+      body = `<span class="status-pill">Claimed by ${claimedByM.name}</span>
+        <div class="claim-row">
+          <button class="claim-btn" style="background:${claimedByM.color}" data-action="finish" data-chore="${c.id}">Mark done</button>
+          <button class="claim-btn" style="background:#999" data-action="unclaim" data-chore="${c.id}">Unclaim</button>
+        </div>`;
+    } else {
+      body = `<div class="claim-row">${kids.map(k=>`
+        <button class="claim-btn" style="background:${k.color}" data-action="claim" data-chore="${c.id}" data-member="${k.id}">${k.name}</button>
+      `).join('')}</div>`;
+    }
+    return `<div class="pool-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div><span class="item-icon">${c.icon||'🧹'}</span> <strong>${c.title}</strong></div>
+        <div class="amount">$${(c.value||0).toFixed(2)}</div>
+      </div>
+      ${body}
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('[data-action]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const choreId = btn.dataset.chore;
+      const action = btn.dataset.action;
+      const c = state.chores.find(x=>x.id===choreId);
+      if(!c) return;
+      if(action==='claim'){
+        c.status='claimed'; c.claimedBy = btn.dataset.member;
+        if(firebaseReady) db.collection('chores').doc(choreId).update({status:'claimed', claimedBy: btn.dataset.member});
+      } else if(action==='unclaim'){
+        c.status='open'; c.claimedBy=null;
+        if(firebaseReady) db.collection('chores').doc(choreId).update({status:'open', claimedBy: null});
+      } else if(action==='finish'){
+        c.status='done';
+        if(firebaseReady) db.collection('chores').doc(choreId).update({status:'done'});
+        const earning = { memberId:c.claimedBy, amount: c.value||0, title:c.title, date: todayISO(), paid:false };
+        state.earnings.push({id:'local'+Date.now(), ...earning});
+        if(firebaseReady) db.collection('earnings').add(earning);
+      }
+      renderAll();
+    });
+  });
+}
+
+function renderEarnings(){
+  const el = document.getElementById('earningsStrip');
+  const kids = state.family.filter(m=>m.role==='child');
+  if(!kids.length){ el.innerHTML=''; return; }
+  el.innerHTML = kids.map(kid=>{
+    const unpaid = state.earnings.filter(e=>e.memberId===kid.id && !e.paid);
+    const total = unpaid.reduce((s,e)=>s+(e.amount||0),0);
+    return `<div class="earnings-card" style="border-top:4px solid ${kid.color}">
+      <div>${kid.name}</div>
+      <div class="amt">$${total.toFixed(2)}</div>
+      <div style="font-size:12px;color:var(--ink-soft)">${unpaid.length} chore${unpaid.length===1?'':'s'} unpaid</div>
+      ${unpaid.length ? `<button class="mark-paid-btn" data-payout="${kid.id}">Mark paid</button>` : ''}
+    </div>`;
+  }).join('');
+  el.querySelectorAll('[data-payout]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const memberId = btn.dataset.payout;
+      state.earnings.forEach(e=>{
+        if(e.memberId===memberId && !e.paid){
+          e.paid = true;
+          if(firebaseReady && !String(e.id).startsWith('local')) db.collection('earnings').doc(e.id).update({paid:true});
+        }
+      });
+      renderAll();
+    });
+  });
+}
+
+/* ============================== RENDER: CALENDAR ============================== */
+let calCursor = new Date(); calCursor.setDate(1);
+
+function renderCalendar(){
+  const label = document.getElementById('calMonthLabel');
+  label.textContent = calCursor.toLocaleDateString(undefined,{month:'long', year:'numeric'});
+  const grid = document.getElementById('calGrid');
+  const firstDow = calCursor.getDay();
+  const daysInMonth = new Date(calCursor.getFullYear(), calCursor.getMonth()+1, 0).getDate();
+  const daysInPrevMonth = new Date(calCursor.getFullYear(), calCursor.getMonth(), 0).getDate();
+
+  let cells = DOW.map(d=>`<div class="cal-dow">${d}</div>`).join('');
+
+  const totalCells = Math.ceil((firstDow + daysInMonth)/7)*7;
+  for(let i=0;i<totalCells;i++){
+    let dayNum, monthOffset=0;
+    if(i < firstDow){ dayNum = daysInPrevMonth - firstDow + i + 1; monthOffset=-1; }
+    else if(i >= firstDow + daysInMonth){ dayNum = i - firstDow - daysInMonth + 1; monthOffset=1; }
+    else { dayNum = i - firstDow + 1; }
+
+    const cellDate = new Date(calCursor.getFullYear(), calCursor.getMonth()+monthOffset, dayNum);
+    const iso = cellDate.toISOString().slice(0,10);
+    const isToday = iso === todayISO();
+    const dayEvents = state.events.filter(e=>e.date===iso);
+    const evtHtml = dayEvents.slice(0,3).map(e=>{
+      const color = (e.assignees&&e.assignees[0]) ? colorOf(e.assignees[0]) : '#888';
+      return `<div class="cal-evt" style="background:${color}">${e.title}</div>`;
+    }).join('');
+
+    cells += `<div class="cal-cell ${monthOffset!==0?'other-month':''} ${isToday?'today':''}" data-date="${iso}">
+      <div class="cal-date-num">${dayNum}</div>
+      ${evtHtml}
+      ${dayEvents.length>3?`<div style="font-size:11px;color:var(--ink-soft)">+${dayEvents.length-3} more</div>`:''}
+    </div>`;
+  }
+  grid.innerHTML = cells;
+  grid.querySelectorAll('.cal-cell').forEach(cell=>{
+    cell.addEventListener('click', ()=> openDayModal(cell.dataset.date));
+  });
+}
+document.getElementById('calPrev').addEventListener('click', ()=>{ calCursor.setMonth(calCursor.getMonth()-1); renderCalendar(); });
+document.getElementById('calNext').addEventListener('click', ()=>{ calCursor.setMonth(calCursor.getMonth()+1); renderCalendar(); });
+
+/* ---------------- Day modal: view + add events ---------------- */
+function openDayModal(iso){
+  const dayEvents = state.events.filter(e=>e.date===iso);
+  const dateLabel = new Date(iso+'T00:00:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
+  const modalRoot = document.getElementById('modalRoot');
+  modalRoot.innerHTML = `
+    <div class="modal-backdrop" id="backdrop">
+      <div class="modal">
+        <button class="close-x" id="closeModal">✕</button>
+        <h3>${dateLabel}</h3>
+        <div id="eventListArea">
+          ${dayEvents.length ? dayEvents.map(e=>`
+            <div class="list-row">
+              <div class="dot" style="background:${(e.assignees&&e.assignees[0])?colorOf(e.assignees[0]):'#999'}"></div>
+              <div class="grow">
+                <strong>${e.title}</strong><br>
+                <span style="font-size:13px;color:var(--ink-soft)">${e.startTime||''}${e.endTime?' – '+e.endTime:''}${e.workBlock?' · blocks work calendar':''}</span>
+              </div>
+              <button class="small-btn" data-del="${e.id}">Delete</button>
+            </div>
+          `).join('') : '<div class="empty-note">Nothing scheduled yet.</div>'}
+        </div>
+        <div class="section-title" style="font-size:16px;margin-top:20px;">Add event</div>
+        <div class="field"><label>Title</label><input type="text" id="newEvtTitle" placeholder="Piano lesson"></div>
+        <div class="field"><label>Start time</label><input type="time" id="newEvtStart"></div>
+        <div class="field"><label>End time</label><input type="time" id="newEvtEnd"></div>
+        <div class="field">
+          <label>Who</label>
+          <div class="assignee-toggles" id="assigneeToggles">
+            ${state.family.map(m=>`<div class="assignee-toggle" data-member="${m.id}" style="--c:${m.color}">${m.name}</div>`).join('')}
+          </div>
+        </div>
+        <div class="field checkbox-row">
+          <input type="checkbox" id="workBlockCheck">
+          <label style="margin:0;font-weight:400;" for="workBlockCheck">Add to work calendar (blocks time in Outlook)</label>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-primary" id="saveEvtBtn">Save event</button>
+          <button class="btn btn-secondary" id="cancelEvtBtn">Cancel</button>
+        </div>
+      </div>
+    </div>
+  `;
+  const selected = new Set();
+  modalRoot.querySelectorAll('.assignee-toggle').forEach(t=>{
+    t.addEventListener('click', ()=>{
+      const id = t.dataset.member;
+      if(selected.has(id)){ selected.delete(id); t.classList.remove('on'); t.style.background=''; t.style.borderColor=''; }
+      else { selected.add(id); t.classList.add('on'); t.style.background = t.style.getPropertyValue('--c'); t.style.borderColor = t.style.getPropertyValue('--c'); }
+    });
+  });
+  document.getElementById('closeModal').addEventListener('click', closeModal);
+  document.getElementById('cancelEvtBtn').addEventListener('click', closeModal);
+  document.getElementById('backdrop').addEventListener('click', (e)=>{ if(e.target.id==='backdrop') closeModal(); });
+  modalRoot.querySelectorAll('[data-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=> deleteEvent(btn.dataset.del, iso));
+  });
+  document.getElementById('saveEvtBtn').addEventListener('click', ()=>{
+    const title = document.getElementById('newEvtTitle').value.trim();
+    if(!title){ alert('Give the event a title first.'); return; }
+    const startTime = document.getElementById('newEvtStart').value;
+    const endTime = document.getElementById('newEvtEnd').value;
+    const workBlock = document.getElementById('workBlockCheck').checked;
+    saveEvent({ title, date: iso, startTime, endTime, assignees: Array.from(selected), workBlock });
+    closeModal();
+  });
+}
+function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
+
+function saveEvent(evt){
+  const tag = `FAMILYAPP-${evt.date}-${evt.title.replace(/\s+/g,'').slice(0,20)}-${Date.now()}`;
+  evt.tag = tag;
+  const localId = 'local'+Date.now();
+  state.events.push({ id: localId, ...evt });
+  renderAll();
+  if(firebaseReady){
+    db.collection('events').add(evt);
+  }
+  if(evt.workBlock){
+    sendWorkBlockEmail(evt, 'ADD');
+  }
+}
+
+function deleteEvent(id, dayIso){
+  const evt = state.events.find(e=>e.id===id);
+  state.events = state.events.filter(e=>e.id!==id);
+  if(firebaseReady && !String(id).startsWith('local')) db.collection('events').doc(id).delete();
+  if(evt && evt.workBlock){ sendWorkBlockEmail(evt, 'REMOVE'); }
+  openDayModal(dayIso);
+  renderCalendar();
+}
+
+/* ---------------- EmailJS trigger for work-calendar block/unblock ---------------- */
+function sendWorkBlockEmail(evt, action){
+  if(!emailjsConfig.publicKey || !emailjsConfig.serviceId || !emailjsConfig.templateId){
+    console.warn('EmailJS not configured — skipping work calendar email. See SETUP.md.');
+    return;
+  }
+  const subjectTag = action === 'ADD' ? '[FAMILYBLOCK]' : '[FAMILYBLOCK-REMOVE]';
+  const bodyLines = [
+    `TAG: ${evt.tag}`,
+    `TITLE: ${evt.title}`,
+    `DATE: ${evt.date}`,
+    `START: ${evt.startTime || ''}`,
+    `END: ${evt.endTime || ''}`
+  ].join('\n');
+  if(typeof emailjs === 'undefined'){
+    console.warn('EmailJS library not loaded.');
+    return;
+  }
+  emailjs.send(emailjsConfig.serviceId, emailjsConfig.templateId, {
+    subject: `${subjectTag} ${evt.title}`,
+    body: bodyLines
+  }, emailjsConfig.publicKey).catch(err => console.error('EmailJS send failed', err));
+}
+
+/* ============================== SETTINGS ============================== */
+function renderSettings(){
+  // Family
+  const famEl = document.getElementById('familyList');
+  famEl.innerHTML = state.family.map(m=>`
+    <div class="list-row">
+      <span class="dot" style="background:${m.color}"></span>
+      <div class="grow">
+        <input type="text" value="${m.name}" data-fam-name="${m.id}" style="border:none;background:none;font-weight:600;font-size:15px;width:100%;">
+      </div>
+      <select data-fam-role="${m.id}">
+        <option value="parent" ${m.role==='parent'?'selected':''}>Parent</option>
+        <option value="child" ${m.role==='child'?'selected':''}>Child</option>
+      </select>
+      <input type="color" value="${m.color}" data-fam-color="${m.id}">
+      <button class="small-btn" data-fam-del="${m.id}">Remove</button>
+    </div>
+  `).join('');
+  famEl.querySelectorAll('[data-fam-name]').forEach(inp=> inp.addEventListener('change', ()=> updateFamily(inp.dataset.famName, {name:inp.value})));
+  famEl.querySelectorAll('[data-fam-role]').forEach(sel=> sel.addEventListener('change', ()=> updateFamily(sel.dataset.famRole, {role:sel.value})));
+  famEl.querySelectorAll('[data-fam-color]').forEach(inp=> inp.addEventListener('change', ()=> updateFamily(inp.dataset.famColor, {color:inp.value})));
+  famEl.querySelectorAll('[data-fam-del]').forEach(btn=> btn.addEventListener('click', ()=> removeDoc('family', btn.dataset.famDel)));
+
+  // Routines
+  const rEl = document.getElementById('routineList');
+  rEl.innerHTML = state.routines.map(r=>`
+    <div class="list-row">
+      <span class="item-icon">${r.icon||'⭐'}</span>
+      <div class="grow">${r.title}</div>
+      <select data-rt-sched="${r.id}">
+        <option value="daily" ${r.schedule==='daily'?'selected':''}>Every day</option>
+        <option value="weekday" ${r.schedule==='weekday'?'selected':''}>Weekdays</option>
+        <option value="weekend" ${r.schedule==='weekend'?'selected':''}>Weekends</option>
+      </select>
+      <div class="assignee-toggles">
+        ${state.family.filter(m=>m.role==='child').map(k=>`
+          <div class="assignee-toggle ${((r.assignedTo||[]).includes(k.id))?'on':''}" data-rt-assign="${r.id}" data-member="${k.id}"
+            style="${((r.assignedTo||[]).includes(k.id))?`background:${k.color};border-color:${k.color};`:''}">${k.name}</div>
+        `).join('')}
+      </div>
+      <button class="small-btn" data-rt-del="${r.id}">Remove</button>
+    </div>
+  `).join('');
+  rEl.querySelectorAll('[data-rt-sched]').forEach(sel=> sel.addEventListener('change', ()=> updateRoutine(sel.dataset.rtSched, {schedule:sel.value})));
+  rEl.querySelectorAll('[data-rt-assign]').forEach(tog=> tog.addEventListener('click', ()=>{
+    const r = state.routines.find(x=>x.id===tog.dataset.rtAssign);
+    const memberId = tog.dataset.member;
+    const set = new Set(r.assignedTo||[]);
+    if(set.has(memberId)) set.delete(memberId); else set.add(memberId);
+    updateRoutine(r.id, {assignedTo: Array.from(set)});
+  }));
+  rEl.querySelectorAll('[data-rt-del]').forEach(btn=> btn.addEventListener('click', ()=> removeDoc('routines', btn.dataset.rtDel)));
+
+  // Chores
+  const cEl = document.getElementById('choreList');
+  cEl.innerHTML = state.chores.map(c=>`
+    <div class="list-row">
+      <span class="item-icon">${c.icon||'🧹'}</span>
+      <div class="grow">${c.title} ${c.type==='pool' ? `<span style="color:var(--accent);font-weight:700;">$${(c.value||0).toFixed(2)}</span>`:''}</div>
+      <span class="status-pill">${c.type==='pool'?'Up for grabs':'Assigned: '+(memberById(c.assignedTo)?.name||'—')}</span>
+      <button class="small-btn" data-ch-del="${c.id}">Remove</button>
+    </div>
+  `).join('');
+  cEl.querySelectorAll('[data-ch-del]').forEach(btn=> btn.addEventListener('click', ()=> removeDoc('chores', btn.dataset.chDel)));
+}
+
+function updateFamily(id, patch){
+  const m = state.family.find(x=>x.id===id); if(m) Object.assign(m, patch);
+  renderAll();
+  if(firebaseReady) db.collection('family').doc(id).update(patch);
+}
+function updateRoutine(id, patch){
+  const r = state.routines.find(x=>x.id===id); if(r) Object.assign(r, patch);
+  renderAll();
+  if(firebaseReady) db.collection('routines').doc(id).update(patch);
+}
+function removeDoc(collection, id){
+  state[collection] = state[collection].filter(x=>x.id!==id);
+  renderAll();
+  if(firebaseReady) db.collection(collection).doc(id).delete();
+}
+
+/* ---------------- Add buttons (settings) ---------------- */
+document.getElementById('addFamilyBtn').addEventListener('click', ()=>{
+  const name = prompt('Name?'); if(!name) return;
+  const role = confirm('Is this a parent? OK = parent, Cancel = child') ? 'parent' : 'child';
+  const color = '#'+Math.floor(Math.random()*16777215).toString(16).padStart(6,'0');
+  const doc = { name, role, color, order: state.family.length };
+  if(firebaseReady){ db.collection('family').add(doc); }
+  else { state.family.push({id:'local'+Date.now(), ...doc}); renderAll(); }
+});
+document.getElementById('addRoutineBtn').addEventListener('click', ()=>{
+  const title = prompt('Routine name? (e.g. Brush teeth)'); if(!title) return;
+  const icon = prompt('Pick an emoji for it (optional)', '⭐') || '⭐';
+  const doc = { title, icon, schedule:'daily', assignedTo: [] };
+  if(firebaseReady){ db.collection('routines').add(doc); }
+  else { state.routines.push({id:'local'+Date.now(), ...doc}); renderAll(); }
+});
+document.getElementById('addChoreBtn').addEventListener('click', ()=>{
+  const title = prompt('Chore name?'); if(!title) return;
+  const isPool = confirm('Is this an "up for grabs" chore with a $ value? OK = yes, Cancel = assigned to one person, no pay');
+  const icon = prompt('Pick an emoji for it (optional)', '🧹') || '🧹';
+  let doc;
+  if(isPool){
+    const value = parseFloat(prompt('Dollar amount?', '1')) || 0;
+    doc = { title, icon, type:'pool', value, status:'open', assignedTo:null, claimedBy:null };
+  } else {
+    const kids = state.family.filter(m=>m.role==='child');
+    const names = kids.map((k,i)=>`${i+1}. ${k.name}`).join('\n');
+    const pick = parseInt(prompt(`Assign to who?\n${names}`,'1'))-1;
+    const assignedTo = kids[pick] ? kids[pick].id : null;
+    doc = { title, icon, type:'assigned', assignedTo, status:'open' };
+  }
+  if(firebaseReady){ db.collection('chores').add(doc); }
+  else { state.chores.push({id:'local'+Date.now(), ...doc}); renderAll(); }
+});
+
+/* ============================== Tabs ============================== */
+document.querySelectorAll('nav.tabs button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('main > section').forEach(s=>s.classList.add('hidden'));
+    document.getElementById('tab-'+btn.dataset.tab).classList.remove('hidden');
+    if(btn.dataset.tab==='calendar') renderCalendar();
+  });
+});
+
+/* ============================== Master render ============================== */
+function renderAll(){
+  renderFamilyStrip();
+  renderRoutineColumns();
+  renderChoreColumns();
+  renderPool();
+  renderEarnings();
+  renderSettings();
+  if(!document.getElementById('tab-calendar').classList.contains('hidden')) renderCalendar();
+}
+renderAll();
+</script>
+
+<!-- EmailJS SDK — only needed if you fill in emailjsConfig above -->
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script>
+  if(emailjsConfig.publicKey && typeof emailjs !== 'undefined'){
+    emailjs.init({ publicKey: emailjsConfig.publicKey });
+  }
+</script>
+</body>
+</html>
