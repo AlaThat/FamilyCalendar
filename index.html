@@ -36,7 +36,8 @@
     color: var(--ink-soft); border-top: 3px solid transparent; font-weight:600; font-family:inherit; flex:1; }
   nav.tabs button.active{ color: var(--ink); border-top-color: var(--accent); }
 
-  main{ flex:1; overflow-y:auto; padding: 16px 20px 24px; }
+  main{ flex:1; overflow-y:auto; padding: 16px 20px 24px; display:flex; flex-direction:column; }
+  #tab-calendar{ display:flex; flex-direction:column; flex:1; min-height:0; }
   .hidden{ display:none !important; }
 
   .family-strip{ display:flex; gap:14px; flex-wrap:wrap; margin-bottom:22px; }
@@ -84,7 +85,7 @@
   .pf-chip{ padding:7px 13px; border-radius:999px; border:2px solid var(--paper-line); cursor:pointer; font-size:13px; font-weight:600; background:var(--white); color:var(--ink-soft); }
   .pf-chip.on{ color:white; border-color:transparent; }
 
-  .cal-grid{ display:grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap:6px; }
+  .cal-grid{ display:grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap:6px; flex:1; min-height:0; }
   .cal-dow{ text-align:center; font-size:12px; color:var(--ink-soft); font-weight:700; padding-bottom:4px; }
   .cal-cell{ background: var(--white); border:1px solid var(--paper-line); border-radius:8px; min-height:90px; min-width:0; padding:6px; cursor:pointer; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
   .cal-cell.other-month{ opacity:0.35; }
@@ -93,7 +94,7 @@
   .cal-evt{ font-size:11px; padding:2px 5px; border-radius:5px; color:white; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cal-evt.allday{ border:1px dashed rgba(255,255,255,0.7); }
 
-  .week-col{ background:var(--white); border:1px solid var(--paper-line); border-radius:8px; padding:8px; min-height:220px; min-width:0; overflow:hidden; cursor:pointer; }
+  .week-col{ background:var(--white); border:1px solid var(--paper-line); border-radius:8px; padding:8px; min-height:220px; height:100%; min-width:0; overflow-x:hidden; overflow-y:auto; cursor:pointer; }
   .week-col.today{ border-color:var(--accent); border-width:2px; }
   .week-col-head{ font-weight:700; font-size:12px; text-align:center; margin-bottom:8px; color:var(--ink-soft); }
   .week-col-head .cal-date-num{ display:block; font-size:18px; color:var(--ink); }
@@ -397,6 +398,14 @@ function eventOccursOnDate(evt, dateISO){
 }
 function eventsOnDate(dateISO){ return state.events.filter(e => eventOccursOnDate(e, dateISO)); }
 function defaultEventTime(){ const d = new Date(); return String(d.getHours()).padStart(2,'0')+':00'; }
+function formatTime12(hhmm){
+  if(!hhmm) return '';
+  const [hStr, mStr] = hhmm.split(':');
+  let h = parseInt(hStr, 10);
+  const period = h >= 12 ? 'PM' : 'AM';
+  h = h % 12; if(h === 0) h = 12;
+  return `${h}:${mStr} ${period}`;
+}
 function displayEventTitle(e, dateISO){
   if(e.recurrence==='yearly' && e.birthYear){
     const age = parseInt(dateISO.slice(0,4),10) - e.birthYear;
@@ -569,20 +578,23 @@ function getPayPeriodRange(refDate){
   const type = state.settings.payPeriodType || 'biweekly';
   const ref = new Date(isoOf(refDate)+'T00:00:00');
   if(type === 'monthly'){
+    // anchor is an actual payday (just its day-of-month matters) — find the soonest
+    // such payday on or after refDate, same "hasn't happened yet" handling as below.
     const dom = anchor.getDate();
-    let start = new Date(ref.getFullYear(), ref.getMonth(), dom);
-    if(start > ref) start = new Date(ref.getFullYear(), ref.getMonth()-1, dom);
-    let end = new Date(start.getFullYear(), start.getMonth()+1, dom);
-    end.setDate(end.getDate()-1);
+    let end = new Date(ref.getFullYear(), ref.getMonth(), dom);
+    if(end < ref) end = new Date(ref.getFullYear(), ref.getMonth()+1, dom);
+    let start = new Date(end.getFullYear(), end.getMonth()-1, dom);
+    start.setDate(start.getDate()+1);
     return {start, end};
   }
   const lengthDays = type === 'weekly' ? 7 : 14;
   const msPerDay = 86400000;
-  let diffDays = Math.floor((ref - anchor)/msPerDay);
-  if(diffDays < 0) diffDays = diffDays - lengthDays*Math.floor(diffDays/lengthDays);
-  const periodIndex = Math.floor(diffDays/lengthDays);
-  const start = new Date(anchor.getTime() + periodIndex*lengthDays*msPerDay);
-  const end = new Date(start.getTime() + (lengthDays-1)*msPerDay);
+  // anchor is an actual payday, not a period start — find the soonest anchor-aligned
+  // payday that is on or after refDate (handles an anchor that hasn't happened yet).
+  const diffDays = Math.round((ref - anchor)/msPerDay);
+  const k = Math.ceil(diffDays/lengthDays);
+  const end = new Date(anchor.getTime() + k*lengthDays*msPerDay);
+  const start = new Date(end.getTime() - (lengthDays-1)*msPerDay);
   return {start, end};
 }
 function renderEarnings(){
@@ -590,7 +602,7 @@ function renderEarnings(){
   const kids = state.family.filter(m=>m.role==='child');
   const {start,end} = getPayPeriodRange(new Date());
   const label = document.getElementById('payPeriodLabel');
-  if(label) label.textContent = `${start.toLocaleDateString(undefined,{month:'short',day:'numeric'})} – ${end.toLocaleDateString(undefined,{month:'short',day:'numeric'})} · next payday ${new Date(end.getTime()+86400000).toLocaleDateString(undefined,{month:'short',day:'numeric'})}`;
+  if(label) label.textContent = `${start.toLocaleDateString(undefined,{month:'short',day:'numeric'})} – ${end.toLocaleDateString(undefined,{month:'short',day:'numeric'})} · next payday ${end.toLocaleDateString(undefined,{month:'short',day:'numeric'})}`;
   if(!kids.length){ el.innerHTML=''; return; }
   const startISO = isoOf(start), endISO = isoOf(end);
   el.innerHTML = kids.map(kid=>{
@@ -684,6 +696,7 @@ function renderMonthGrid(){
   const daysInPrevMonth = new Date(calCursor.getFullYear(), calCursor.getMonth(), 0).getDate();
   let cells = DOW.map(d=>`<div class="cal-dow">${d}</div>`).join('');
   const totalCells = Math.ceil((firstDow + daysInMonth)/7)*7;
+  grid.style.gridTemplateRows = `auto repeat(${totalCells/7}, 1fr)`;
   for(let i=0;i<totalCells;i++){
     let dayNum, monthOffset=0;
     if(i < firstDow){ dayNum = daysInPrevMonth - firstDow + i + 1; monthOffset=-1; }
@@ -709,6 +722,7 @@ function renderMonthGrid(){
 function renderWeekGrid(){
   const grid = document.getElementById('calGrid');
   grid.style.gridTemplateColumns = 'repeat(7, minmax(0,1fr))';
+  grid.style.gridTemplateRows = '1fr';
   const start = startOfWeek(weekCursor);
   let html = '';
   for(let i=0;i<7;i++){
@@ -718,7 +732,7 @@ function renderWeekGrid(){
     const dayEvents = eventsOnDateFiltered(iso);
     html += `<div class="week-col ${isToday?'today':''}" data-date="${iso}">
       <div class="week-col-head">${DOW[d.getDay()]}<span class="cal-date-num">${d.getDate()}</span></div>
-      ${dayEvents.length ? dayEvents.map(e=>`<div class="week-evt" data-event-id="${e.id}" style="background:${eventColor(e)}"><strong>${e.allDay?'All day':esc(e.startTime||'')}</strong> ${esc(displayEventTitle(e, iso))}</div>`).join('') : ''}
+      ${dayEvents.length ? dayEvents.map(e=>`<div class="week-evt" data-event-id="${e.id}" style="background:${eventColor(e)}"><strong>${e.allDay?'All day':esc(formatTime12(e.startTime))}</strong> ${esc(displayEventTitle(e, iso))}</div>`).join('') : ''}
     </div>`;
   }
   grid.innerHTML = html;
@@ -731,6 +745,7 @@ function renderWeekGrid(){
 function renderDayGrid(){
   const grid = document.getElementById('calGrid');
   grid.style.gridTemplateColumns = '1fr';
+  grid.style.gridTemplateRows = 'auto';
   const iso = isoOf(dayCursor);
   const dayEvents = eventsOnDateFiltered(iso).slice().sort((a,b)=>{
     if(a.allDay && !b.allDay) return -1;
@@ -740,7 +755,7 @@ function renderDayGrid(){
   grid.innerHTML = `<div class="day-view" data-date="${iso}">
     ${dayEvents.length ? dayEvents.map(e=>`
       <div class="day-evt" data-event-id="${e.id}" style="border-left-color:${eventColor(e)}">
-        <div class="day-evt-time">${e.allDay?'All day':esc(e.startTime||'')+(e.endTime?' – '+esc(e.endTime):'')}</div>
+        <div class="day-evt-time">${e.allDay?'All day':esc(formatTime12(e.startTime))+(e.endTime?' – '+esc(formatTime12(e.endTime)):'')}</div>
         <div class="day-evt-title">${esc(displayEventTitle(e, iso))}</div>
         ${e.notes?`<div class="day-evt-notes">📍 ${esc(e.notes)}</div>`:''}
       </div>
@@ -791,7 +806,7 @@ function openDayModal(iso, editEvent){
               <div class="dot" style="background:${eventColor(e)}"></div>
               <div class="grow"><strong>${esc(displayEventTitle(e, iso))}</strong><br>
                 <span style="font-size:13px;color:var(--ink-soft)">
-                  ${e.allDay ? 'All day' : `${e.startTime||''}${e.endTime?' – '+e.endTime:''}`}
+                  ${e.allDay ? 'All day' : `${esc(formatTime12(e.startTime))}${e.endTime?' – '+esc(formatTime12(e.endTime)):''}`}
                   ${e.endDate && e.endDate!==e.date ? ' · through '+new Date(e.endDate+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}) : ''}
                   ${e.recurrence && e.recurrence!=='none' ? ' · '+recurrenceLabel(e.recurrence) : ''}
                   ${e.workBlock ? ' · blocks work calendar' : ''}
