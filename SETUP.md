@@ -90,6 +90,10 @@ Trigger on subject `[FAMILYBLOCK-REMOVE]` → **Get calendar view of events (V3)
 - **Person filter** — tap a family member's name to see just their items; events assigned to everyone (or left unassigned, like a holiday) show in a distinct dark color and always appear regardless of filter
 - **Real recurrence options** — daily, weekly, every 2 weeks, monthly (same date), monthly (same weekday — "1st Tuesday"), yearly — not just yearly
 - Full edit/delete on calendar events, multi-day events, all-day events with no one assigned, changing an event's date without deleting and re-adding it
+- **Shared assigned chores** — an unpaid chore can be assigned to more than one kid at once, the same tap-to-toggle picker as routines; either kid checking it off marks it done for both
+- **Start time shown on calendar pills** (Month/Week/Day) for anything that isn't an all-day event
+- **Recurring reminders** in Settings, in addition to the one-off reminders you can still add from the Today tab — pick which days they show up and they reset automatically each day, no re-adding
+- **Multi-person event color** — an event assigned to more than one person but not everyone now shows as an even color-band split between just those people, instead of silently showing only the first person's color
 - Reminders on Today, routines split Morning/Evening/Anytime, configurable pay period, sign-in gate, no personal data in the public source
 - Home Screen tiles check for their own updates automatically every 30 minutes and reload themselves once no form is open — see "Set up the iPad as a wall display" above
 

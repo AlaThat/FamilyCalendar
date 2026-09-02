@@ -216,6 +216,12 @@
         <button class="add-row-btn" id="addChoreBtn">+ Add chore</button>
       </div>
       <div class="settings-block">
+        <div class="section-title">Recurring reminders</div>
+        <p class="section-sub">Show up automatically on Today's reminder list on the days you pick, no need to re-add them. For one-off reminders, use the Today tab instead.</p>
+        <div id="recurringReminderList"></div>
+        <button class="add-row-btn" id="addRecurringReminderBtn">+ Add recurring reminder</button>
+      </div>
+      <div class="settings-block">
         <div class="section-title">Payout</div>
         <div class="field"><label>An actual payday date (any one — we'll figure out the cycle from there)</label><input type="date" id="payAnchorInput"></div>
         <div class="field"><label>How often</label>
@@ -298,6 +304,7 @@ if(firebaseReady){
 /* ---------------- State ---------------- */
 const state = {
   family: [], routines: [], routineLog: {}, chores: [], earnings: [], events: [], reminders: [],
+  recurringReminders: [], recurringReminderLog: {},
   settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '' }
 };
 const todayISO = () => new Date().toISOString().slice(0,10);
@@ -341,9 +348,15 @@ function initFirestoreListeners(){
   watchCollection('events', rows => { state.events = rows; renderAll(); });
   watchCollection('earnings', rows => { state.earnings = rows; renderAll(); });
   watchCollection('reminders', rows => { state.reminders = rows; renderAll(); });
+  watchCollection('recurringReminders', rows => { state.recurringReminders = rows; renderAll(); });
   db.collection('routineLog').where('date','==', todayISO()).onSnapshot(snap=>{
     state.routineLog = {};
     snap.forEach(doc=>{ const d=doc.data(); state.routineLog[`${d.date}_${d.routineId}_${d.memberId}`]=d.done; });
+    renderAll();
+  });
+  db.collection('recurringReminderLog').where('date','==', todayISO()).onSnapshot(snap=>{
+    state.recurringReminderLog = {};
+    snap.forEach(doc=>{ const d=doc.data(); state.recurringReminderLog[`${d.date}_${d.reminderId}`]=d.done; });
     renderAll();
   });
   db.collection('settings').doc('main').onSnapshot(doc=>{
@@ -415,7 +428,16 @@ function isEveryoneEvent(e){
   const n = (e.assignees||[]).length;
   return n===0 || (state.family.length>0 && n>=state.family.length);
 }
-function eventColor(e){ return isEveryoneEvent(e) ? 'var(--everyone)' : colorOf(e.assignees[0]); }
+function eventColor(e){
+  if(isEveryoneEvent(e)) return 'var(--everyone)';
+  const ids = e.assignees || [];
+  if(ids.length <= 1) return colorOf(ids[0]);
+  const colors = ids.map(colorOf);
+  const step = 100/colors.length;
+  const stops = colors.map((c,i)=> `${c} ${(i*step).toFixed(2)}%, ${c} ${((i+1)*step).toFixed(2)}%`).join(', ');
+  return `linear-gradient(90deg, ${stops})`;
+}
+function eventBorderColor(e){ return isEveryoneEvent(e) ? 'var(--everyone)' : colorOf((e.assignees||[])[0]); }
 let calPersonFilter = null;
 function passesPersonFilter(e){ if(!calPersonFilter) return true; return isEveryoneEvent(e) || (e.assignees||[]).includes(calPersonFilter); }
 function eventsOnDateFiltered(dateISO){ return eventsOnDate(dateISO).filter(passesPersonFilter); }
@@ -431,14 +453,28 @@ function renderFamilyStrip(){
 }
 function renderReminders(){
   const el = document.getElementById('reminderList');
-  if(!state.reminders.length){ el.innerHTML = '<div class="empty-note">Nothing on the list.</div>'; return; }
-  el.innerHTML = state.reminders.map(r=>`
+  const recurringToday = state.recurringReminders.filter(routineAppliesToday).map(r=>({
+    id: 'rr_'+r.id, sourceId: r.id, text: r.text, recurring: true,
+    done: !!state.recurringReminderLog[`${todayISO()}_${r.id}`]
+  }));
+  const manual = state.reminders.map(r=> ({ ...r, recurring:false }));
+  const all = [...recurringToday, ...manual];
+  if(!all.length){ el.innerHTML = '<div class="empty-note">Nothing on the list.</div>'; return; }
+  el.innerHTML = all.map(r=>`
     <div class="reminder-item">
-      <div class="check-btn ${r.done?'done':''}" data-rem-toggle="${r.id}">${r.done?'✓':''}</div>
-      <div class="item-label" style="${r.done?'text-decoration:line-through;color:var(--ink-soft);':''}">${esc(r.text)}</div>
-      <button class="del-x" data-rem-del="${r.id}">✕</button>
+      <div class="check-btn ${r.done?'done':''}" data-rem-toggle="${r.id}" data-recurring="${r.recurring}" data-source="${r.sourceId||''}">${r.done?'✓':''}</div>
+      <div class="item-label" style="${r.done?'text-decoration:line-through;color:var(--ink-soft);':''}">${esc(r.text)}${r.recurring?' <span title="repeats" style="font-size:11px;color:var(--ink-soft);">↻</span>':''}</div>
+      ${r.recurring?'':`<button class="del-x" data-rem-del="${r.id}">✕</button>`}
     </div>`).join('');
   el.querySelectorAll('[data-rem-toggle]').forEach(btn=> btn.addEventListener('click', ()=>{
+    if(btn.dataset.recurring === 'true'){
+      const key = `${todayISO()}_${btn.dataset.source}`;
+      const newVal = !state.recurringReminderLog[key];
+      state.recurringReminderLog[key] = newVal;
+      renderReminders();
+      if(firebaseReady) dbWrite(db.collection('recurringReminderLog').doc(key).set({date:todayISO(), reminderId:btn.dataset.source, done:newVal}));
+      return;
+    }
     const r = state.reminders.find(x=>x.id===btn.dataset.remToggle); if(!r) return;
     r.done = !r.done; renderAll();
     if(firebaseReady) dbWrite(db.collection('reminders').doc(r.id).update({done:r.done}));
@@ -510,11 +546,14 @@ function renderChoreColumns(){
     return;
   }
   el.innerHTML = kids.map(kid => {
-    const items = assigned.filter(c => c.assignedTo === kid.id);
+    const items = assigned.filter(c => (Array.isArray(c.assignedTo) ? c.assignedTo : [c.assignedTo].filter(Boolean)).includes(kid.id));
     if(!items.length) return '';
-    const rows = items.map(c => `<div class="chore-item">
+    const rows = items.map(c => {
+      const sharedWith = (Array.isArray(c.assignedTo) ? c.assignedTo : []).filter(id=>id!==kid.id).map(id=>memberById(id)?.name).filter(Boolean);
+      return `<div class="chore-item">
         <div class="check-btn ${c.status==='done'?'done':''}" data-chore="${c.id}">${c.status==='done'?'✓':''}</div>
-        <div class="item-icon">${esc(c.icon||'🧹')}</div><div class="item-label">${esc(c.title)}</div></div>`).join('');
+        <div class="item-icon">${esc(c.icon||'🧹')}</div><div class="item-label">${esc(c.title)}${sharedWith.length?` <span style="font-size:12px;color:var(--ink-soft)">(with ${esc(sharedWith.join(', '))})</span>`:''}</div></div>`;
+    }).join('');
     return `<div class="member-card" style="border-top-color:${kid.color}">
       <h3><span class="dot" style="width:16px;height:16px;background:${kid.color}"></span>${esc(kid.name)}</h3>${rows}</div>`;
   }).join('');
@@ -704,7 +743,7 @@ function renderMonthGrid(){
     const iso = isoOf(cellDate);
     const isToday = iso === todayISO();
     const dayEvents = eventsOnDateFiltered(iso);
-    const evtHtml = dayEvents.slice(0,3).map(e=> `<div class="cal-evt ${e.allDay?'allday':''}" data-event-id="${e.id}" style="background:${eventColor(e)}">${esc(displayEventTitle(e, iso))}</div>`).join('');
+    const evtHtml = dayEvents.slice(0,3).map(e=> `<div class="cal-evt ${e.allDay?'allday':''}" data-event-id="${e.id}" style="background:${eventColor(e)}">${!e.allDay&&e.startTime?`<strong>${esc(formatTime12(e.startTime))}</strong> `:''}${esc(displayEventTitle(e, iso))}</div>`).join('');
     cells += `<div class="cal-cell ${monthOffset!==0?'other-month':''} ${isToday?'today':''}" data-date="${iso}">
       <div class="cal-date-num">${dayNum}</div>${evtHtml}
       ${dayEvents.length>3?`<div style="font-size:11px;color:var(--ink-soft)">+${dayEvents.length-3} more</div>`:''}
@@ -752,7 +791,7 @@ function renderDayGrid(){
   });
   grid.innerHTML = `<div class="day-view" data-date="${iso}">
     ${dayEvents.length ? dayEvents.map(e=>`
-      <div class="day-evt" data-event-id="${e.id}" style="border-left-color:${eventColor(e)}">
+      <div class="day-evt" data-event-id="${e.id}" style="border-left-color:${eventBorderColor(e)}">
         <div class="day-evt-time">${e.allDay?'All day':esc(formatTime12(e.startTime))+(e.endTime?' – '+esc(formatTime12(e.endTime)):'')}</div>
         <div class="day-evt-title">${esc(displayEventTitle(e, iso))}</div>
         ${e.notes?`<div class="day-evt-notes">📍 ${esc(e.notes)}</div>`:''}
@@ -1070,9 +1109,13 @@ function openChoreModal(existing){
       <label><input type="radio" name="chType" value="assigned" ${type==='assigned'?'checked':''}> Assigned, no pay</label>
     </div>
     <div class="field" id="chValueField" style="${type==='pool'?'':'display:none;'}"><label>Amount</label><input type="number" step="0.25" min="0" id="chValue" value="${isEdit&&existing.value!=null?existing.value:'1'}"></div>
-    <div class="field" id="chAssignField" style="${type==='assigned'?'':'display:none;'}"><label>Assign to</label><select id="chAssignee">
-      ${kids.map(k=>`<option value="${k.id}" ${isEdit&&existing.assignedTo===k.id?'selected':''}>${esc(k.name)}</option>`).join('')}
-    </select></div>
+    <div class="field" id="chAssignField" style="${type==='assigned'?'':'display:none;'}"><label>Assign to (pick one or more to share it)</label>
+      <div class="assignee-toggles" id="chAssignees">
+        ${kids.map(k=>{
+          const on = isEdit && (Array.isArray(existing.assignedTo) ? existing.assignedTo : [existing.assignedTo].filter(Boolean)).includes(k.id);
+          return `<div class="assignee-toggle" data-member="${k.id}" style="--c:${k.color};${on?`background:${k.color};border-color:${k.color};color:white;`:''}">${esc(k.name)}</div>`;
+        }).join('')}
+      </div></div>
     <div class="modal-actions">
       <button class="btn btn-primary" id="chSave">Save</button>
       ${isEdit?'<button class="btn btn-danger" id="chDelete">Remove</button>':''}
@@ -1080,6 +1123,14 @@ function openChoreModal(existing){
     </div>
   </div></div>`;
   wireIconPicker('chIcon');
+  const chSelected = new Set(isEdit ? (Array.isArray(existing.assignedTo) ? existing.assignedTo : [existing.assignedTo].filter(Boolean)) : []);
+  modalRoot.querySelectorAll('#chAssignees .assignee-toggle').forEach(t=>{
+    t.addEventListener('click', ()=>{
+      const id = t.dataset.member;
+      if(chSelected.has(id)){ chSelected.delete(id); t.style.background=''; t.style.borderColor=''; t.style.color=''; }
+      else { chSelected.add(id); t.style.background=t.style.getPropertyValue('--c'); t.style.borderColor=t.style.getPropertyValue('--c'); t.style.color='white'; }
+    });
+  });
   modalRoot.querySelectorAll('input[name=chType]').forEach(r=>{
     r.addEventListener('change', ()=>{
       const v = modalRoot.querySelector('input[name=chType]:checked').value;
@@ -1098,14 +1149,44 @@ function openChoreModal(existing){
     if(chosenType==='pool'){
       data = { title, icon: document.getElementById('chIcon').value.trim()||'🧹', type:'pool', value: parseFloat(document.getElementById('chValue').value)||0, status: isEdit&&existing.status?existing.status:'open', assignedTo:null, claimedBy: isEdit?existing.claimedBy||null:null };
     } else {
-      const kidSelect = document.getElementById('chAssignee');
-      data = { title, icon: document.getElementById('chIcon').value.trim()||'🧹', type:'assigned', assignedTo: kidSelect ? kidSelect.value : null, status: isEdit&&existing.status?existing.status:'open' };
+      data = { title, icon: document.getElementById('chIcon').value.trim()||'🧹', type:'assigned', assignedTo: Array.from(chSelected), status: isEdit&&existing.status?existing.status:'open' };
     }
     if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('chores').doc(existing.id).update(data)); }
     else { if(firebaseReady) dbWrite(db.collection('chores').add(data)); else state.chores.push({id:uid('local'), ...data}); }
     renderAll(); closeModal();
   });
   if(isEdit) document.getElementById('chDelete').addEventListener('click', ()=>{ removeDoc('chores', existing.id); closeModal(); });
+}
+function openRecurringReminderModal(existing){
+  const isEdit = !!existing;
+  const modalRoot = document.getElementById('modalRoot');
+  modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">
+    <button class="close-x" id="closeModal">✕</button>
+    <h3>${isEdit?'Edit recurring reminder':'Add recurring reminder'}</h3>
+    <div class="field"><label>What's the reminder?</label><input type="text" id="rrText" placeholder="Water the plants" value="${isEdit?esc(existing.text):''}"></div>
+    <div class="field"><label>Which days</label><select id="rrSchedule">
+      <option value="daily" ${!isEdit||existing.schedule==='daily'?'selected':''}>Every day</option>
+      <option value="weekday" ${isEdit&&existing.schedule==='weekday'?'selected':''}>Weekdays only</option>
+      <option value="weekend" ${isEdit&&existing.schedule==='weekend'?'selected':''}>Weekends only</option>
+    </select></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="rrSave">Save</button>
+      ${isEdit?'<button class="btn btn-danger" id="rrDelete">Remove</button>':''}
+      <button class="btn btn-secondary" id="rrCancel">Cancel</button>
+    </div>
+  </div></div>`;
+  document.getElementById('closeModal').addEventListener('click', closeModal);
+  document.getElementById('rrCancel').addEventListener('click', closeModal);
+  document.getElementById('backdrop').addEventListener('click', e=>{ if(e.target.id==='backdrop') closeModal(); });
+  document.getElementById('rrSave').addEventListener('click', ()=>{
+    const text = document.getElementById('rrText').value.trim();
+    if(!text){ showToast('Name the reminder first.'); return; }
+    const data = { text, schedule: document.getElementById('rrSchedule').value };
+    if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('recurringReminders').doc(existing.id).update(data)); }
+    else { if(firebaseReady) dbWrite(db.collection('recurringReminders').add(data)); else state.recurringReminders.push({id:uid('local'), ...data}); }
+    renderAll(); closeModal();
+  });
+  if(isEdit) document.getElementById('rrDelete').addEventListener('click', ()=>{ removeDoc('recurringReminders', existing.id); closeModal(); });
 }
 
 /* ============================== SETTINGS ============================== */
@@ -1133,14 +1214,26 @@ function renderSettings(){
   rEl.querySelectorAll('[data-rt-edit]').forEach(btn=> btn.addEventListener('click', ()=> openRoutineModal(state.routines.find(x=>x.id===btn.dataset.rtEdit))));
 
   const cEl = document.getElementById('choreList');
-  cEl.innerHTML = state.chores.map(c=>`
-    <div class="list-row">
+  cEl.innerHTML = state.chores.map(c=>{
+    const assignedNames = (Array.isArray(c.assignedTo) ? c.assignedTo : [c.assignedTo].filter(Boolean)).map(id=>memberById(id)?.name).filter(Boolean).join(', ');
+    return `<div class="list-row">
       <span class="item-icon">${esc(c.icon||'🧹')}</span>
       <div class="grow"><strong>${esc(c.title)}</strong> ${c.type==='pool' ? `<span style="color:var(--accent);font-weight:700;">$${(c.value||0).toFixed(2)}</span>`:''}
-        <span class="status-pill">${c.type==='pool'?'Up for grabs':'Assigned: '+(memberById(c.assignedTo)?.name||'—')}</span></div>
+        <span class="status-pill">${c.type==='pool'?'Up for grabs':'Assigned: '+(assignedNames||'—')}</span></div>
       <button class="small-btn" data-ch-edit="${c.id}">Edit</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   cEl.querySelectorAll('[data-ch-edit]').forEach(btn=> btn.addEventListener('click', ()=> openChoreModal(state.chores.find(x=>x.id===btn.dataset.chEdit))));
+
+  const rrEl = document.getElementById('recurringReminderList');
+  rrEl.innerHTML = state.recurringReminders.map(r=>{
+    const scheduleLabel = r.schedule==='weekday'?'Weekdays':r.schedule==='weekend'?'Weekends':'Every day';
+    return `<div class="list-row">
+      <div class="grow"><strong>${esc(r.text)}</strong> <span class="status-pill">${scheduleLabel}</span></div>
+      <button class="small-btn" data-rr-edit="${r.id}">Edit</button>
+    </div>`;
+  }).join('');
+  rrEl.querySelectorAll('[data-rr-edit]').forEach(btn=> btn.addEventListener('click', ()=> openRecurringReminderModal(state.recurringReminders.find(x=>x.id===btn.dataset.rrEdit))));
 
   const anchorInput = document.getElementById('payAnchorInput');
   const typeInput = document.getElementById('payTypeInput');
@@ -1157,6 +1250,7 @@ function removeDoc(collection, id){
 document.getElementById('addFamilyBtn').addEventListener('click', ()=> openFamilyModal(null));
 document.getElementById('addRoutineBtn').addEventListener('click', ()=> openRoutineModal(null));
 document.getElementById('addChoreBtn').addEventListener('click', ()=> openChoreModal(null));
+document.getElementById('addRecurringReminderBtn').addEventListener('click', ()=> openRecurringReminderModal(null));
 document.getElementById('savePayoutBtn').addEventListener('click', ()=>{
   const data = Object.assign({}, state.settings, { payPeriodAnchor: document.getElementById('payAnchorInput').value || todayISO(), payPeriodType: document.getElementById('payTypeInput').value });
   state.settings = data;
