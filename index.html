@@ -81,16 +81,16 @@
   .pf-chip{ padding:7px 13px; border-radius:999px; border:2px solid var(--paper-line); cursor:pointer; font-size:13px; font-weight:600; background:var(--white); color:var(--ink-soft); }
   .pf-chip.on{ color:white; border-color:transparent; }
 
-  .cal-grid{ display:grid; grid-template-columns: repeat(7, 1fr); gap:6px; }
+  .cal-grid{ display:grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap:6px; }
   .cal-dow{ text-align:center; font-size:12px; color:var(--ink-soft); font-weight:700; padding-bottom:4px; }
-  .cal-cell{ background: var(--white); border:1px solid var(--paper-line); border-radius:8px; min-height:90px; padding:6px; cursor:pointer; display:flex; flex-direction:column; gap:4px; }
+  .cal-cell{ background: var(--white); border:1px solid var(--paper-line); border-radius:8px; min-height:90px; min-width:0; padding:6px; cursor:pointer; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
   .cal-cell.other-month{ opacity:0.35; }
   .cal-cell.today{ border-color: var(--accent); border-width:2px; }
   .cal-date-num{ font-family:"Fraunces",serif; font-weight:600; font-size:15px; }
   .cal-evt{ font-size:11px; padding:2px 5px; border-radius:5px; color:white; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cal-evt.allday{ border:1px dashed rgba(255,255,255,0.7); }
 
-  .week-col{ background:var(--white); border:1px solid var(--paper-line); border-radius:8px; padding:8px; min-height:220px; cursor:pointer; }
+  .week-col{ background:var(--white); border:1px solid var(--paper-line); border-radius:8px; padding:8px; min-height:220px; min-width:0; overflow:hidden; cursor:pointer; }
   .week-col.today{ border-color:var(--accent); border-width:2px; }
   .week-col-head{ font-weight:700; font-size:12px; text-align:center; margin-bottom:8px; color:var(--ink-soft); }
   .week-col-head .cal-date-num{ display:block; font-size:18px; color:var(--ink); }
@@ -387,6 +387,7 @@ function eventOccursOnDate(evt, dateISO){
   return false;
 }
 function eventsOnDate(dateISO){ return state.events.filter(e => eventOccursOnDate(e, dateISO)); }
+function nowTimeHHMM(){ const d = new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function isEveryoneEvent(e){
   const n = (e.assignees||[]).length;
   return n===0 || (state.family.length>0 && n>=state.family.length);
@@ -650,7 +651,7 @@ document.getElementById('calAddBtn').addEventListener('click', ()=> openDayModal
 
 function renderMonthGrid(){
   const grid = document.getElementById('calGrid');
-  grid.style.gridTemplateColumns = 'repeat(7, 1fr)';
+  grid.style.gridTemplateColumns = 'repeat(7, minmax(0,1fr))';
   const firstDow = calCursor.getDay();
   const daysInMonth = new Date(calCursor.getFullYear(), calCursor.getMonth()+1, 0).getDate();
   const daysInPrevMonth = new Date(calCursor.getFullYear(), calCursor.getMonth(), 0).getDate();
@@ -676,7 +677,7 @@ function renderMonthGrid(){
 }
 function renderWeekGrid(){
   const grid = document.getElementById('calGrid');
-  grid.style.gridTemplateColumns = 'repeat(7, 1fr)';
+  grid.style.gridTemplateColumns = 'repeat(7, minmax(0,1fr))';
   const start = startOfWeek(weekCursor);
   let html = '';
   for(let i=0;i<7;i++){
@@ -747,11 +748,13 @@ function openDayModal(iso, editEvent){
         <div class="section-title" style="font-size:16px;margin-top:20px;">${isEdit?'Edit event':'Add event'}</div>
         <div class="field"><label>Title</label><input type="text" id="newEvtTitle" placeholder="Piano lesson" value="${isEdit?esc(editEvent.title):''}"></div>
 
+        <div class="field"><label>Date</label><input type="date" id="newEvtDate" value="${isEdit?editEvent.date:iso}"></div>
+
         <div class="checkbox-row"><input type="checkbox" id="allDayCheck" ${isEdit&&editEvent.allDay?'checked':''}><label for="allDayCheck">All day</label></div>
 
         <div id="timeFields" class="${isEdit&&editEvent.allDay?'hidden':''}">
-          <div class="field"><label>Start time</label><input type="time" id="newEvtStart" value="${isEdit?(editEvent.startTime||''):''}"></div>
-          <div class="field"><label>End time</label><input type="time" id="newEvtEnd" value="${isEdit?(editEvent.endTime||''):''}"></div>
+          <div class="field"><label>Start time</label><input type="time" id="newEvtStart" value="${isEdit?(editEvent.startTime||''):nowTimeHHMM()}"></div>
+          <div class="field"><label>End time</label><input type="time" id="newEvtEnd" value="${isEdit?(editEvent.endTime||''):nowTimeHHMM()}"></div>
         </div>
 
         <div class="field"><label>Repeats</label>
@@ -805,6 +808,17 @@ function openDayModal(iso, editEvent){
   document.getElementById('newEvtRepeat').addEventListener('change', (e)=>{
     document.getElementById('endDateField').style.display = e.target.value==='none' ? '' : 'none';
   });
+  const dateInput = document.getElementById('newEvtDate');
+  const endDateInput = document.getElementById('newEvtEndDate');
+  const startInput = document.getElementById('newEvtStart');
+  const endInput = document.getElementById('newEvtEnd');
+  endDateInput.min = dateInput.value;
+  dateInput.addEventListener('change', ()=>{ endDateInput.min = dateInput.value; });
+  endInput.min = startInput.value;
+  startInput.addEventListener('change', ()=>{
+    endInput.min = startInput.value;
+    if(!endInput.value || endInput.value < startInput.value) endInput.value = startInput.value;
+  });
   document.getElementById('closeModal').addEventListener('click', closeModal);
   document.getElementById('cancelEvtBtn').addEventListener('click', closeModal);
   document.getElementById('backdrop').addEventListener('click', (e)=>{ if(e.target.id==='backdrop') closeModal(); });
@@ -817,13 +831,21 @@ function openDayModal(iso, editEvent){
   document.getElementById('saveEvtBtn').addEventListener('click', ()=>{
     const title = document.getElementById('newEvtTitle').value.trim();
     if(!title){ showToast('Give the event a title first.'); return; }
+    const dateVal = document.getElementById('newEvtDate').value;
+    if(!dateVal){ showToast('Pick a date for the event.'); return; }
     const allDay = document.getElementById('allDayCheck').checked;
     const startTime = allDay ? '' : document.getElementById('newEvtStart').value;
     const endTime = allDay ? '' : document.getElementById('newEvtEnd').value;
+    if(!allDay && startTime && endTime && endTime < startTime){
+      showToast('End time can\'t be before the start time.'); return;
+    }
     const recurrence = document.getElementById('newEvtRepeat').value;
     const endDateVal = recurrence==='none' ? document.getElementById('newEvtEndDate').value : '';
+    if(endDateVal && endDateVal < dateVal){
+      showToast('The "lasts through" date can\'t be before the start date.'); return;
+    }
     const workBlock = document.getElementById('workBlockCheck').checked;
-    const data = { title, date: iso, endDate: endDateVal || iso, allDay, startTime, endTime, recurrence, assignees: Array.from(selected), workBlock };
+    const data = { title, date: dateVal, endDate: endDateVal || dateVal, allDay, startTime, endTime, recurrence, assignees: Array.from(selected), workBlock };
     if(isEdit) updateEvent(editEvent.id, data); else saveEvent(data);
     closeModal();
   });
