@@ -52,6 +52,14 @@ thing you can do first — it will likely surface real bugs that were never actu
 - **Drag-and-drop was explicitly deferred**, not forgotten — touch-drag gesture reliability on
   old iPadOS Safari couldn't be verified without a real device/browser in hand. A tap-to-move
   quick-edit was proposed as a lower-risk substitute. Ask before building real drag-and-drop.
+- **The app does NOT use `apple-mobile-web-app-capable`** (the meta tag that makes a Home Screen
+  tile open chromeless, without Safari's address bar). This was tried once to reclaim screen
+  space and immediately broke the on-screen keyboard on the sign-in screen after a real
+  delete-and-recreate test on the iPad. This is a real, long-standing WebKit bug in standalone
+  home-screen web apps — documented across iOS 15 through at least 18, not something specific to
+  this app's code — and it isn't reliably fixable from the web-app side. Don't re-add this meta
+  tag without first confirming (via current, dated sources, not assumption) that Apple has
+  actually fixed the underlying bug on the iPadOS version this device is capped at.
 - **Importing/subscribing to external calendars (e.g. a partner's calendar feed) was explicitly
   deferred**: browsers block direct cross-origin fetches of arbitrary ICS URLs, so this needs a
   server-side fetch — which means enabling Firebase's paid Blaze plan (usage would stay in the
