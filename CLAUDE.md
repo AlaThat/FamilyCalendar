@@ -91,19 +91,44 @@ thing you can do first — it will likely surface real bugs that were never actu
   'morning'|'evening'|'anytime', assignedTo: [memberId]}`
 - `routineLog`: doc id `${date}_${routineId}_${memberId}` → `{date, routineId, memberId, done}`
 - `chores`: `{title, icon, type: 'pool'|'assigned', value, status: 'open'|'claimed'|'done',
-  assignedTo, claimedBy}`
+  assignedTo, claimedBy}` — for `type==='assigned'`, `assignedTo` is `[memberId]` (can be more
+  than one kid, like routines — a shared chore with one shared `status`, so any assignee checking
+  it off marks it done for all of them, since assigned chores are unpaid). For `type==='pool'`,
+  `assignedTo` is unused (`null`) and `claimedBy` is a single memberId.
 - `earnings`: `{memberId, amount, title, date, paid}` — one row per completed pool chore
 - `events`: `{title, date, endDate, allDay, startTime, endTime, recurrence:
   'none'|'daily'|'weekly'|'biweekly'|'monthly-date'|'monthly-weekday'|'yearly', assignees:
-  [memberId] (empty or all-members = "applies to everyone", shown in a distinct dark color),
-  notes, birthYear, workBlock, tag}` — `tag` is used to correlate with the Outlook block via
-  Power Automate. `notes` is free text (location, details) shown in the day list and Day view.
-  `birthYear` only applies when `recurrence==='yearly'`; when set, the display title gets a
-  computed `(turning N)` suffix (`N` = the displayed occurrence's year minus `birthYear`) —
-  never stored on the title itself, so it stays correct every year with no upkeep.
-- `reminders`: `{text, done}`
+  [memberId] (empty or all-members = "applies to everyone", shown in a distinct dark color; 2+
+  members but not everyone shows as an equal-width multi-color gradient split, one band per
+  assignee), notes, birthYear, workBlock, tag}` — `tag` is used to correlate with the Outlook
+  block via Power Automate. `notes` is free text (location, details) shown in the day list and
+  Day view. `birthYear` only applies when `recurrence==='yearly'`; when set, the display title
+  gets a computed `(turning N)` suffix (`N` = the displayed occurrence's year minus `birthYear`)
+  — never stored on the title itself, so it stays correct every year with no upkeep.
+- `reminders`: `{text, done}` — one-off, manually added/removed from the Today tab, done state
+  persists until deleted.
+- `recurringReminders`: `{text, schedule: 'daily'|'weekday'|'weekend'}` — configured in Settings;
+  shows up automatically on Today's reminder list (marked with a ↻) on its scheduled days.
+- `recurringReminderLog`: doc id `${date}_${reminderId}` → `{date, reminderId, done}` — same
+  per-day-reset pattern as `routineLog`, just without a `memberId` since reminders aren't
+  per-person.
 - `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly',
   workEmailTo}`
+
+**Computed calendar content — not stored anywhere.** US federal holidays (all 11, always
+shown — confirmed with the user, no Settings toggle), seasons (equinoxes/solstices, via Jean
+Meeus's low-precision algorithm — verified against published 2026 times to the minute before
+shipping), and US Daylight Saving Time changes (exact, per US law: 2nd Sunday in March / 1st
+Sunday in November) are computed fresh from date math in `computedEventsOnDate()` and merged
+into `eventsOnDate()` as read-only "everyone" all-day entries (`holiday:true`). They're never
+written to Firestore, need no yearly upkeep, and can't be edited or deleted — `findEventById`
+only searches real `state.events`, so tapping one just opens that day's list, same as tapping
+empty cell space. Moon phase icons (🌑🌓🌕🌗, only on the 4 exact phase days each cycle — not
+every day) are separate: computed per-date by `moonPhaseIconForDate()` and shown next to the
+date number in Month/Week views, not injected as calendar entries. If any of this is ever
+revisited, get explicit scope from the user first (which holiday set, on-by-default vs. a
+toggle, how moon phases should display) — guessing on exactly this cost a full round-trip
+once already (see the Home Screen chrome saga above).
 
 Recurrence + multi-day (`endDate`) are mutually exclusive in the current implementation —
 recurring events are treated as single-day only. This is a known simplification, not a bug.
