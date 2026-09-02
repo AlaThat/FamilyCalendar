@@ -7,262 +7,194 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap" rel="stylesheet">
 
-<!-- Firebase (compat build so this works with zero build step, on old Safari) -->
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
 
 <style>
   :root{
-    --paper: #F6F1E4;
-    --paper-line: #E4DBC4;
-    --ink: #2C2A24;
-    --ink-soft: #6B6656;
-    --accent: #B5542C;
-    --white: #FFFDF8;
-    --shadow: 0 1px 0 rgba(44,42,36,0.08);
-    --radius: 10px;
+    --paper: #F6F1E4; --paper-line: #E4DBC4; --ink: #2C2A24; --ink-soft: #6B6656;
+    --accent: #B5542C; --white: #FFFDF8; --radius: 10px; --everyone: #3A362C;
   }
   *{ box-sizing: border-box; }
-  html,body{
-    margin:0; padding:0; height:100%;
-    background: var(--paper);
-    color: var(--ink);
+  html,body{ margin:0; padding:0; height:100%; background: var(--paper); color: var(--ink);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -webkit-tap-highlight-color: transparent;
-    overflow-x: hidden;
-  }
-  .display-num{ font-family: "Fraunces", Georgia, serif; }
-
-  /* ---------- App shell ---------- */
+    -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
   #app{ display:flex; flex-direction:column; height:100vh; }
 
-  header.topbar{
-    display:flex; align-items:baseline; justify-content:space-between;
-    padding: 18px 24px 10px;
-    border-bottom: 1px solid var(--paper-line);
-    flex-shrink:0;
-  }
-  header.topbar h1{
-    font-family:"Fraunces", Georgia, serif;
-    font-weight:600; font-size: 28px; margin:0;
-  }
-  header.topbar .today-str{ color: var(--ink-soft); font-size:15px; }
+  header.topbar{ display:flex; align-items:center; justify-content:space-between; padding: 10px 20px; border-bottom: 1px solid var(--paper-line); flex-shrink:0; }
+  header.topbar .brand{ font-family:"Fraunces", Georgia, serif; font-weight:600; font-size: 15px; letter-spacing:0.02em; color:var(--ink-soft); }
+  .signout-link{ font-size:13px; color:var(--ink-soft); text-decoration:underline; cursor:pointer; background:none; border:none; font-family:inherit; }
 
-  nav.tabs{
-    display:flex; gap:4px; padding: 10px 20px 0;
-    border-bottom: 1px solid var(--paper-line);
-    flex-shrink:0;
-  }
-  nav.tabs button{
-    appearance:none; border:none; background:none; cursor:pointer;
-    font-size:16px; padding: 10px 16px; color: var(--ink-soft);
-    border-bottom: 3px solid transparent; font-weight:600;
-    font-family:inherit;
-  }
-  nav.tabs button.active{ color: var(--ink); border-bottom-color: var(--accent); }
+  /* Bottom nav */
+  nav.tabs{ display:flex; gap:2px; justify-content:space-around; padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--paper-line); flex-shrink:0; background:var(--paper); position:sticky; bottom:0; z-index:40; }
+  nav.tabs button{ appearance:none; border:none; background:none; cursor:pointer; font-size:13px; padding: 8px 10px;
+    color: var(--ink-soft); border-top: 3px solid transparent; font-weight:600; font-family:inherit; flex:1; }
+  nav.tabs button.active{ color: var(--ink); border-top-color: var(--accent); }
 
-  main{ flex:1; overflow-y:auto; padding: 20px 24px 60px; }
-
+  main{ flex:1; overflow-y:auto; padding: 16px 20px 24px; }
   .hidden{ display:none !important; }
 
-  /* ---------- Family strip ---------- */
   .family-strip{ display:flex; gap:14px; flex-wrap:wrap; margin-bottom:22px; }
-  .chip{
-    display:flex; align-items:center; gap:8px;
-    background: var(--white); border:1px solid var(--paper-line);
-    border-radius: 999px; padding:6px 14px 6px 6px;
-    font-weight:600; font-size:14px;
-  }
+  .chip{ display:flex; align-items:center; gap:8px; background: var(--white); border:1px solid var(--paper-line); border-radius: 999px; padding:6px 14px 6px 6px; font-weight:600; font-size:14px; }
   .dot{ width:22px; height:22px; border-radius:50%; flex-shrink:0; }
 
-  /* ---------- Today tab ---------- */
-  .section-title{
-    font-family:"Fraunces", Georgia, serif; font-weight:600;
-    font-size:20px; margin: 26px 0 12px;
-  }
+  .section-title{ font-family:"Fraunces", Georgia, serif; font-weight:600; font-size:20px; margin: 26px 0 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
   .section-title:first-child{ margin-top:0; }
+  .section-sub{ font-size:13px; color:var(--ink-soft); font-weight:400; font-family:-apple-system,sans-serif; }
+  .subhead{ font-size:13px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.04em; margin:14px 0 6px; }
 
-  .member-column{
-    display:grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr));
-    gap:16px;
-  }
-  .member-card{
-    background: var(--white); border:1px solid var(--paper-line);
-    border-radius: var(--radius); padding:16px; border-top: 6px solid #ccc;
-  }
+  .member-column{ display:grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap:16px; }
+  .member-card{ background: var(--white); border:1px solid var(--paper-line); border-radius: var(--radius); padding:16px; border-top: 6px solid #ccc; }
   .member-card h3{ margin:0 0 10px; font-size:17px; display:flex; align-items:center; gap:8px; }
-  .routine-item, .chore-item{
-    display:flex; align-items:center; gap:12px;
-    padding: 10px 4px; border-bottom:1px solid var(--paper-line);
-    font-size: 16px;
-  }
-  .routine-item:last-child, .chore-item:last-child{ border-bottom:none; }
-  .check-btn{
-    width:34px; height:34px; border-radius:8px; flex-shrink:0;
-    border:2px solid var(--ink-soft); background:var(--white);
-    display:flex; align-items:center; justify-content:center;
-    font-size:20px; cursor:pointer;
-  }
+  .routine-item, .chore-item, .reminder-item{ display:flex; align-items:center; gap:12px; padding: 10px 4px; border-bottom:1px solid var(--paper-line); font-size: 16px; }
+  .routine-item:last-child, .chore-item:last-child, .reminder-item:last-child{ border-bottom:none; }
+  .check-btn{ width:34px; height:34px; border-radius:8px; flex-shrink:0; border:2px solid var(--ink-soft); background:var(--white); display:flex; align-items:center; justify-content:center; font-size:20px; cursor:pointer; }
   .check-btn.done{ background: var(--ink); border-color: var(--ink); color: var(--white); }
   .item-icon{ font-size:22px; width:26px; text-align:center; }
   .item-label{ flex:1; }
   .empty-note{ color: var(--ink-soft); font-size:14px; padding:8px 4px; }
+  .del-x{ background:none; border:none; color:var(--ink-soft); font-size:16px; cursor:pointer; }
 
-  /* ---------- Chores / pool ---------- */
   .pool-grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap:14px; }
-  .pool-card{
-    background: var(--white); border:1px solid var(--paper-line); border-radius: var(--radius);
-    padding:16px; display:flex; flex-direction:column; gap:10px;
-  }
+  .pool-card{ background: var(--white); border:1px solid var(--paper-line); border-radius: var(--radius); padding:16px; display:flex; flex-direction:column; gap:10px; }
   .pool-card .amount{ font-family:"Fraunces",serif; font-size:24px; font-weight:600; color: var(--accent); }
   .claim-row{ display:flex; gap:8px; flex-wrap:wrap; }
-  .claim-btn{
-    border:none; border-radius:999px; padding:8px 14px; font-weight:600; cursor:pointer;
-    color:white; font-size:14px;
-  }
+  .claim-btn{ border:none; border-radius:999px; padding:8px 14px; font-weight:600; cursor:pointer; color:white; font-size:14px; }
   .status-pill{ font-size:13px; font-weight:600; color: var(--ink-soft); }
 
   .earnings-strip{ display:flex; gap:16px; flex-wrap:wrap; margin-top:8px; }
-  .earnings-card{
-    background: var(--white); border:1px solid var(--paper-line); border-radius: var(--radius);
-    padding:14px 18px; min-width:180px;
-  }
+  .earnings-card{ background: var(--white); border:1px solid var(--paper-line); border-radius: var(--radius); padding:14px 18px; min-width:190px; }
   .earnings-card .amt{ font-family:"Fraunces",serif; font-size:26px; font-weight:600; }
-  .mark-paid-btn{
-    margin-top:8px; font-size:13px; border:1px solid var(--ink-soft); background:none;
-    border-radius:8px; padding:6px 10px; cursor:pointer;
-  }
+  .mark-paid-btn{ margin-top:8px; font-size:13px; border:1px solid var(--ink-soft); background:none; border-radius:8px; padding:6px 10px; cursor:pointer; }
 
-  /* ---------- Calendar tab ---------- */
-  .cal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
-  .cal-header h2{ font-family:"Fraunces",serif; font-weight:600; font-size:24px; margin:0; }
-  .cal-nav-btn{
-    border:1px solid var(--paper-line); background:var(--white); border-radius:8px;
-    width:38px; height:38px; font-size:18px; cursor:pointer;
-  }
+  /* Calendar */
+  .cal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:10px; }
+  .cal-header h2{ font-family:"Fraunces",serif; font-weight:600; font-size:28px; margin:0; }
+  .cal-nav-btn{ border:1px solid var(--paper-line); background:var(--white); border-radius:8px; width:38px; height:38px; font-size:18px; cursor:pointer; }
+  .cal-add-btn{ border:none; background:var(--ink); color:white; border-radius:8px; padding:9px 16px; font-weight:700; cursor:pointer; font-size:14px; }
+  .view-toggle{ display:flex; border:1px solid var(--paper-line); border-radius:8px; overflow:hidden; }
+  .vt-btn{ border:none; background:var(--white); padding:8px 14px; font-size:13px; font-weight:700; cursor:pointer; color:var(--ink-soft); }
+  .vt-btn.active{ background:var(--ink); color:white; }
+  .person-filter{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .pf-chip{ padding:7px 13px; border-radius:999px; border:2px solid var(--paper-line); cursor:pointer; font-size:13px; font-weight:600; background:var(--white); color:var(--ink-soft); }
+  .pf-chip.on{ color:white; border-color:transparent; }
+
   .cal-grid{ display:grid; grid-template-columns: repeat(7, 1fr); gap:6px; }
   .cal-dow{ text-align:center; font-size:12px; color:var(--ink-soft); font-weight:700; padding-bottom:4px; }
-  .cal-cell{
-    background: var(--white); border:1px solid var(--paper-line); border-radius:8px;
-    min-height:90px; padding:6px; cursor:pointer; display:flex; flex-direction:column; gap:4px;
-  }
+  .cal-cell{ background: var(--white); border:1px solid var(--paper-line); border-radius:8px; min-height:90px; padding:6px; cursor:pointer; display:flex; flex-direction:column; gap:4px; }
   .cal-cell.other-month{ opacity:0.35; }
   .cal-cell.today{ border-color: var(--accent); border-width:2px; }
   .cal-date-num{ font-family:"Fraunces",serif; font-weight:600; font-size:15px; }
-  .cal-evt{
-    font-size:11px; padding:2px 5px; border-radius:5px; color:white; font-weight:600;
-    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  }
+  .cal-evt{ font-size:11px; padding:2px 5px; border-radius:5px; color:white; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cal-evt.allday{ border:1px dashed rgba(255,255,255,0.7); }
 
-  /* ---------- Modal ---------- */
-  .modal-backdrop{
-    position:fixed; inset:0; background:rgba(44,42,36,0.45);
-    display:flex; align-items:center; justify-content:center; z-index:50; padding:20px;
-  }
-  .modal{
-    background: var(--white); border-radius: 14px; padding:22px; width:100%; max-width:440px;
-    max-height:85vh; overflow-y:auto;
-  }
+  .week-col{ background:var(--white); border:1px solid var(--paper-line); border-radius:8px; padding:8px; min-height:220px; cursor:pointer; }
+  .week-col.today{ border-color:var(--accent); border-width:2px; }
+  .week-col-head{ font-weight:700; font-size:12px; text-align:center; margin-bottom:8px; color:var(--ink-soft); }
+  .week-col-head .cal-date-num{ display:block; font-size:18px; color:var(--ink); }
+  .week-evt{ font-size:11px; color:white; padding:4px 6px; border-radius:6px; margin-bottom:4px; line-height:1.3; }
+
+  .modal-backdrop{ position:fixed; inset:0; background:rgba(44,42,36,0.45); display:flex; align-items:center; justify-content:center; z-index:50; padding:20px; }
+  .modal{ background: var(--white); border-radius: 14px; padding:22px; width:100%; max-width:460px; max-height:88vh; overflow-y:auto; }
   .modal h3{ font-family:"Fraunces",serif; margin-top:0; }
   .field{ margin-bottom:14px; }
   .field label{ display:block; font-size:13px; font-weight:700; margin-bottom:5px; color:var(--ink-soft); }
-  .field input[type=text], .field input[type=date], .field input[type=time], .field input[type=number], .field select, .field textarea{
-    width:100%; padding:10px; border:1px solid var(--paper-line); border-radius:8px; font-size:15px;
-    font-family:inherit; background: var(--paper);
+  .field input[type=text], .field input[type=date], .field input[type=time], .field input[type=number], .field input[type=email], .field input[type=password], .field select, .field textarea{
+    width:100%; padding:10px; border:1px solid var(--paper-line); border-radius:8px; font-size:15px; font-family:inherit; background: var(--paper);
   }
-  .checkbox-row{ display:flex; align-items:center; gap:8px; font-size:15px; }
+  .checkbox-row{ display:flex; align-items:center; gap:8px; font-size:15px; margin-bottom:14px; }
+  .checkbox-row label{ margin:0; font-weight:400; }
+  .radio-row{ display:flex; gap:16px; font-size:15px; margin-bottom:10px; flex-wrap:wrap; }
+  .radio-row label{ display:flex; align-items:center; gap:6px; font-weight:400; }
   .assignee-toggles{ display:flex; gap:8px; flex-wrap:wrap; }
-  .assignee-toggle{
-    padding:7px 12px; border-radius:999px; border:2px solid var(--paper-line); cursor:pointer;
-    font-size:14px; font-weight:600; background:var(--white);
-  }
-  .assignee-toggle.on{ color:white; border-color:transparent; }
-  .modal-actions{ display:flex; gap:10px; margin-top:18px; }
-  .btn{
-    border:none; border-radius:8px; padding:11px 18px; font-weight:700; cursor:pointer; font-size:15px;
-    font-family:inherit;
-  }
+  .assignee-toggle{ padding:7px 12px; border-radius:999px; border:2px solid var(--paper-line); cursor:pointer; font-size:14px; font-weight:600; background:var(--white); }
+  .icon-grid{ display:grid; grid-template-columns: repeat(8, 1fr); gap:6px; margin-bottom:8px; }
+  .icon-opt{ font-size:20px; text-align:center; padding:6px 0; border-radius:8px; border:2px solid transparent; cursor:pointer; background:var(--paper); }
+  .icon-opt.on{ border-color: var(--accent); background:#FCEFE4; }
+  .modal-actions{ display:flex; gap:10px; margin-top:18px; flex-wrap:wrap; }
+  .btn{ border:none; border-radius:8px; padding:11px 18px; font-weight:700; cursor:pointer; font-size:15px; font-family:inherit; }
   .btn-primary{ background: var(--ink); color:white; }
   .btn-secondary{ background: var(--paper); border:1px solid var(--paper-line); }
   .btn-danger{ background:#fff; color:#B5342C; border:1px solid #B5342C; }
   .close-x{ float:right; background:none; border:none; font-size:20px; cursor:pointer; color:var(--ink-soft); }
+  .evt-row-actions{ display:flex; gap:6px; }
 
-  /* ---------- Settings tab ---------- */
   .settings-block{ margin-bottom:32px; }
-  .list-row{
-    display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--paper-line);
-  }
-  .list-row .grow{ flex:1; }
-  .small-btn{
-    border:1px solid var(--paper-line); background:var(--white); border-radius:6px;
-    padding:5px 10px; font-size:13px; cursor:pointer;
-  }
-  .add-row-btn{
-    margin-top:10px; background:none; border:1px dashed var(--ink-soft); border-radius:8px;
-    padding:10px; width:100%; cursor:pointer; font-weight:600; color:var(--ink-soft); font-size:15px;
-  }
-  .config-warning{
-    background:#FCEFE4; border:1px solid #E8B98C; border-radius:10px; padding:14px 16px;
-    font-size:14px; margin-bottom:18px; line-height:1.5;
-  }
+  .list-row{ display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--paper-line); flex-wrap:wrap; }
+  .list-row .grow{ flex:1; min-width:100px; }
+  .small-btn{ border:1px solid var(--paper-line); background:var(--white); border-radius:6px; padding:5px 10px; font-size:13px; cursor:pointer; }
+  .add-row-btn{ margin-top:10px; background:none; border:1px dashed var(--ink-soft); border-radius:8px; padding:10px; width:100%; cursor:pointer; font-weight:600; color:var(--ink-soft); font-size:15px; }
+  .config-warning{ background:#FCEFE4; border:1px solid #E8B98C; border-radius:10px; padding:14px 16px; font-size:14px; margin-bottom:18px; line-height:1.5; }
 
-  @media (max-width: 640px){
-    header.topbar h1{ font-size:22px; }
-    main{ padding: 16px; }
-  }
+  #toast{ position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:#B5342C; color:white;
+    padding:12px 20px; border-radius:10px; font-size:14px; font-weight:600; z-index:100; max-width:90%;
+    box-shadow:0 4px 12px rgba(0,0,0,0.2); }
+  #loginScreen{ display:flex; align-items:center; justify-content:center; height:100vh; }
+  .login-box{ background:var(--white); border:1px solid var(--paper-line); border-radius:14px; padding:32px; width:100%; max-width:360px; }
+  .login-box h1{ font-family:"Fraunces",serif; margin-top:0; }
+
+  @media (max-width: 640px){ main{ padding: 14px; } .cal-header h2{ font-size:22px; } }
 </style>
 </head>
 <body>
 
-<div id="app">
-  <header class="topbar">
+<div id="loginScreen" class="hidden">
+  <div class="login-box">
     <h1>Our Week</h1>
-    <div class="today-str" id="todayStr"></div>
-  </header>
+    <p style="color:var(--ink-soft);font-size:14px;">Sign in with the account created for your household.</p>
+    <div class="field"><label>Email</label><input type="email" id="loginEmail"></div>
+    <div class="field"><label>Password</label><input type="password" id="loginPassword"></div>
+    <div id="loginError" style="color:#B5342C;font-size:13px;margin-bottom:10px;"></div>
+    <button class="btn btn-primary" id="loginBtn" style="width:100%;">Sign in</button>
+  </div>
+</div>
 
-  <nav class="tabs">
-    <button data-tab="today" class="active">Today</button>
-    <button data-tab="calendar">Calendar</button>
-    <button data-tab="chores">Chores</button>
-    <button data-tab="settings">Settings</button>
-  </nav>
+<div id="app" class="hidden">
+  <header class="topbar">
+    <div class="brand">Our Week</div>
+    <button class="signout-link" id="signOutBtn">Sign out</button>
+  </header>
 
   <main>
     <div id="configWarning" class="config-warning hidden">
       This app isn't connected to a database yet. Open <code>index.html</code> and fill in the
-      <code>firebaseConfig</code> section near the bottom with your own free Firebase project's keys
-      (see SETUP.md). Until then, nothing you add here will be saved or synced.
+      <code>firebaseConfig</code> section with your own free Firebase project's keys (see SETUP.md).
     </div>
 
-    <!-- TODAY -->
-    <section id="tab-today">
+    <section id="tab-calendar">
+      <div class="cal-header">
+        <button class="cal-nav-btn" id="calPrev">‹</button>
+        <h2 id="calMonthLabel"></h2>
+        <button class="cal-nav-btn" id="calNext">›</button>
+        <div class="view-toggle">
+          <button class="vt-btn active" data-view="month">Month</button>
+          <button class="vt-btn" data-view="week">Week</button>
+        </div>
+        <button class="cal-add-btn" id="calAddBtn">+ Add event</button>
+      </div>
+      <div class="person-filter" id="personFilter"></div>
+      <div class="cal-grid" id="calGrid"></div>
+    </section>
+
+    <section id="tab-today" class="hidden">
       <div class="family-strip" id="familyStrip"></div>
+      <div class="section-title">Reminders <button class="small-btn" id="addReminderBtn">+ Add</button></div>
+      <div id="reminderList" style="background:var(--white);border:1px solid var(--paper-line);border-radius:var(--radius);padding:6px 16px;"></div>
       <div class="section-title">Routines</div>
       <div class="member-column" id="routineColumns"></div>
       <div class="section-title">Today's chores</div>
       <div class="member-column" id="choreColumns"></div>
     </section>
 
-    <!-- CALENDAR -->
-    <section id="tab-calendar" class="hidden">
-      <div class="cal-header">
-        <button class="cal-nav-btn" id="calPrev">‹</button>
-        <h2 id="calMonthLabel"></h2>
-        <button class="cal-nav-btn" id="calNext">›</button>
-      </div>
-      <div class="cal-grid" id="calGrid"></div>
-    </section>
-
-    <!-- CHORES (full board) -->
     <section id="tab-chores" class="hidden">
       <div class="section-title">Up for grabs</div>
       <div class="pool-grid" id="poolGrid"></div>
-      <div class="section-title">Earnings this pay period</div>
+      <div class="section-title">Earnings this pay period <span class="section-sub" id="payPeriodLabel"></span></div>
       <div class="earnings-strip" id="earningsStrip"></div>
     </section>
 
-    <!-- SETTINGS -->
     <section id="tab-settings" class="hidden">
       <div class="settings-block">
         <div class="section-title">Family members</div>
@@ -279,172 +211,277 @@
         <div id="choreList"></div>
         <button class="add-row-btn" id="addChoreBtn">+ Add chore</button>
       </div>
+      <div class="settings-block">
+        <div class="section-title">Payout</div>
+        <div class="field"><label>An actual payday date (any one — we'll figure out the cycle from there)</label><input type="date" id="payAnchorInput"></div>
+        <div class="field"><label>How often</label>
+          <select id="payTypeInput">
+            <option value="weekly">Every week</option>
+            <option value="biweekly">Every 2 weeks</option>
+            <option value="monthly">Every month</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="savePayoutBtn">Save</button>
+      </div>
+      <div class="settings-block">
+        <div class="section-title">Work calendar email</div>
+        <p class="section-sub">The inbox that receives the trigger email when you check "Add to work calendar" on an event. Set this up in Power Automate too — see SETUP.md.</p>
+        <div class="field"><label>Send trigger emails to</label><input type="email" id="workEmailInput" placeholder="you@yourcompany.com"></div>
+        <button class="btn btn-primary" id="saveWorkEmailBtn">Save</button>
+      </div>
     </section>
   </main>
+
+  <nav class="tabs">
+    <button data-tab="calendar" class="active">Calendar</button>
+    <button data-tab="today">Today</button>
+    <button data-tab="chores">Chores</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
 </div>
 
 <div id="modalRoot"></div>
+<div id="toast" class="hidden"></div>
 
 <script>
-/* ============================================================
-   FIREBASE CONFIG — replace with your own free project's keys.
-   Firebase Console -> Project settings -> General -> Your apps -> SDK setup
-   ============================================================ */
+/* FIREBASE CONFIG — safe to be public per Firebase's own docs; access is controlled by
+   Firestore Security Rules + the sign-in gate on this page, not by hiding these values. */
 const firebaseConfig = {
- apiKey: "AIzaSyBO19dkQdmTS6qnoCcZhlwl2OuJZJVkAnE",
- authDomain: "familycalendar-34b6c.firebaseapp.com",
- projectId: "familycalendar-34b6c",
- storageBucket: "familycalendar-34b6c.firebasestorage.app",
- messagingSenderId: "561250695738",
- appId: "1:561250695738:web:970b517bfe61ba3db89303"
+  apiKey: "AIzaSyBO19dkQdmTS6qnoCcZhlwl2OuJZJVkAnE",
+  authDomain: "familycalendar-34b6c.firebaseapp.com",
+  projectId: "familycalendar-34b6c",
+  storageBucket: "familycalendar-34b6c.firebasestorage.app",
+  messagingSenderId: "561250695738",
+  appId: "1:561250695738:web:970b517bfe61ba3db89303"
 };
 
-/* ============================================================
-   EMAILJS CONFIG — used only for the "Add to work calendar" box.
-   Leave blank to disable that feature safely.
-   See SETUP.md for how to get these three values (free tier).
-   ============================================================ */
-const emailjsConfig = {
-  publicKey: "",
-  serviceId: "",
-  templateId: ""   // template should just include {{subject}} and {{body}} fields
-};
+/* EmailJS — public key is safe to expose (see SETUP.md). */
+const emailjsConfig = { publicKey: "", serviceId: "", templateId: "" };
 
-let db = null;
-let firebaseReady = false;
+let db = null, auth = null, firebaseReady = false;
 try{
-  if(firebaseConfig.apiKey !== "AIzaSyBO19dkQdmTS6qnoCcZhlwl2OuJZJVkAnE"){
+  if(firebaseConfig.apiKey !== "REPLACE_ME"){
     firebase.initializeApp(firebaseConfig);
     db = firebase.firestore();
+    auth = firebase.auth();
     firebaseReady = true;
   }
 }catch(e){ console.error("Firebase init failed", e); }
+if(!firebaseReady){ document.getElementById('configWarning').classList.remove('hidden'); }
 
-if(!firebaseReady){
-  document.getElementById('configWarning').classList.remove('hidden');
-}
+const ICONS = ['⭐','🛏️','🪥','🧸','🧹','🍽️','🐕','🐈','📚','👕','🗑️','🧺','🚗','🧦','🥣','🪟','🌱','🧴','🎒','✏️','🛁','🧻','🍎','🎂','🎉','✈️','🏖️','🏫','⚕️','💼','📅','❤️','🎄','🎃','🦃','🇺🇸','🕎'];
 
-/* ---------------- In-memory state (mirrors Firestore) ---------------- */
+function showLogin(){ document.getElementById('loginScreen').classList.remove('hidden'); document.getElementById('app').classList.add('hidden'); }
+function showApp(){ document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('app').classList.remove('hidden'); }
+
+if(firebaseReady){
+  auth.onAuthStateChanged(user=>{ if(user){ showApp(); initFirestoreListeners(); } else { showLogin(); } });
+  document.getElementById('loginBtn').addEventListener('click', ()=>{
+    const email = document.getElementById('loginEmail').value.trim();
+    const pw = document.getElementById('loginPassword').value;
+    auth.signInWithEmailAndPassword(email, pw).catch(err=>{
+      document.getElementById('loginError').textContent = 'Could not sign in — check the email and password.';
+      console.error(err);
+    });
+  });
+  document.getElementById('signOutBtn').addEventListener('click', ()=> auth.signOut());
+} else { showApp(); }
+
+/* ---------------- State ---------------- */
 const state = {
-  family: [],       // {id, name, role, color}
-  routines: [],      // {id, title, icon, schedule, assignedTo:[]}
-  routineLog: {},     // key `${date}_${routineId}_${memberId}` -> true/false
-  chores: [],        // {id, title, icon, type, assignedTo, value, claimedBy, status}
-  earnings: [],       // {id, memberId, amount, title, date, paid}
-  events: []          // {id, title, date, startTime, endTime, assignees:[], workBlock, tag}
+  family: [], routines: [], routineLog: {}, chores: [], earnings: [], events: [], reminders: [],
+  settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '' }
 };
-
 const todayISO = () => new Date().toISOString().slice(0,10);
+const isoOf = d => d.toISOString().slice(0,10);
 const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-
-function fmtDateHeader(d){
-  return d.toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' });
-}
-document.getElementById('todayStr').textContent = fmtDateHeader(new Date());
-
 function memberById(id){ return state.family.find(m => m.id === id); }
 function colorOf(id){ const m = memberById(id); return m ? m.color : '#999'; }
-
-/* ---------------- Firestore wiring (only if configured) ---------------- */
-function watchCollection(name, cb){
-  if(!firebaseReady) return;
-  db.collection(name).onSnapshot(snap => {
-    const rows = [];
-    snap.forEach(doc => rows.push({ id: doc.id, ...doc.data() }));
-    cb(rows);
-  });
+function uid(prefix){ return prefix + Date.now() + Math.floor(Math.random()*1000); }
+function esc(str){
+  return String(str==null?'':str).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+let toastTimer = null;
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> t.classList.add('hidden'), 6000);
+}
+function dbWrite(promise){
+  if(promise && typeof promise.catch === 'function'){
+    promise.catch(err=>{
+      console.error('Save failed:', err);
+      showToast('Could not save — ' + (err && err.message ? err.message : 'check your sign-in and connection') + '. Your last change may not have kept.');
+    });
+  }
+  return promise;
 }
 
+/* ---------------- Firestore wiring ---------------- */
+let listenersStarted = false;
+function watchCollection(name, cb){
+  if(!firebaseReady) return;
+  db.collection(name).onSnapshot(snap => { const rows=[]; snap.forEach(d=>rows.push({id:d.id, ...d.data()})); cb(rows); },
+    err => { console.error(name, err); showToast('Could not load '+name+' — check your sign-in and connection.'); });
+}
 function initFirestoreListeners(){
-  watchCollection('family', rows => { state.family = rows.sort((a,b)=> (a.order||0)-(b.order||0)); renderAll(); });
+  if(listenersStarted) return; listenersStarted = true;
+  watchCollection('family', rows => { state.family = rows.sort((a,b)=>(a.order||0)-(b.order||0)); renderAll(); });
   watchCollection('routines', rows => { state.routines = rows; renderAll(); });
   watchCollection('chores', rows => { state.chores = rows; renderAll(); });
   watchCollection('events', rows => { state.events = rows; renderAll(); });
   watchCollection('earnings', rows => { state.earnings = rows; renderAll(); });
+  watchCollection('reminders', rows => { state.reminders = rows; renderAll(); });
   db.collection('routineLog').where('date','==', todayISO()).onSnapshot(snap=>{
     state.routineLog = {};
-    snap.forEach(doc=>{ const d = doc.data(); state.routineLog[`${d.date}_${d.routineId}_${d.memberId}`] = d.done; });
+    snap.forEach(doc=>{ const d=doc.data(); state.routineLog[`${d.date}_${d.routineId}_${d.memberId}`]=d.done; });
+    renderAll();
+  });
+  db.collection('settings').doc('main').onSnapshot(doc=>{
+    if(doc.exists) state.settings = Object.assign({payPeriodAnchor:null,payPeriodType:'biweekly',workEmailTo:''}, doc.data());
     renderAll();
   });
 }
-if(firebaseReady) initFirestoreListeners();
 
-/* ---------------- Demo fallback data (only shown if not configured) --------------- */
+/* Generic placeholder data — only used if Firebase isn't connected */
 if(!firebaseReady){
   state.family = [
-    {id:'ala', name:'Ala', role:'parent', color:'#2F5233', order:0},
-    {id:'christian', name:'Christian', role:'parent', color:'#1F3A5F', order:1},
-    {id:'lily', name:'Lily', role:'child', color:'#C0392B', order:2},
-    {id:'hazel', name:'Hazel', role:'child', color:'#D4A017', order:3},
+    {id:'p1', name:'Parent 1', role:'parent', color:'#2F5233', order:0},
+    {id:'p2', name:'Parent 2', role:'parent', color:'#1F3A5F', order:1},
+    {id:'k1', name:'Kid 1', role:'child', color:'#C0392B', order:2},
+    {id:'k2', name:'Kid 2', role:'child', color:'#D4A017', order:3},
   ];
   state.routines = [
-    {id:'r1', title:'Make bed', icon:'🛏️', schedule:'daily', assignedTo:['lily','hazel']},
-    {id:'r2', title:'Brush teeth', icon:'🪥', schedule:'daily', assignedTo:['lily','hazel']},
-    {id:'r3', title:'Tidy living room', icon:'🧸', schedule:'daily', assignedTo:['lily','hazel']},
+    {id:'r1', title:'Make bed', icon:'🛏️', schedule:'daily', timeOfDay:'morning', assignedTo:['k1','k2']},
+    {id:'r2', title:'Brush teeth', icon:'🪥', schedule:'daily', timeOfDay:'morning', assignedTo:['k1','k2']},
+    {id:'r3', title:'Brush teeth', icon:'🪥', schedule:'daily', timeOfDay:'evening', assignedTo:['k1','k2']},
   ];
-  state.chores = [
-    {id:'c1', title:'Load dishwasher', icon:'🍽️', type:'pool', value:1, status:'open'},
-    {id:'c2', title:'Feed the dog', icon:'🐕', type:'pool', value:1, status:'open'},
-  ];
+  state.chores = [ {id:'c1', title:'Load dishwasher', icon:'🍽️', type:'pool', value:1, status:'open'} ];
+  state.settings.payPeriodAnchor = todayISO();
 }
 
-/* ============================== RENDER: TODAY ============================== */
+/* ============================== RECURRENCE / DATE MATCHING ============================== */
+function daysInMonthOf(d){ return new Date(d.getFullYear(), d.getMonth()+1, 0).getDate(); }
+function eventOccursOnDate(evt, dateISO){
+  const d = new Date(dateISO+'T00:00:00');
+  const startD = new Date(evt.date+'T00:00:00');
+  const rec = evt.recurrence || 'none';
+  if(rec === 'none'){
+    const endD = evt.endDate ? new Date(evt.endDate+'T00:00:00') : startD;
+    return d >= startD && d <= endD;
+  }
+  if(d < startD) return false;
+  if(rec === 'daily') return true;
+  if(rec === 'weekly'){ return Math.round((d-startD)/86400000) % 7 === 0; }
+  if(rec === 'biweekly'){ return Math.round((d-startD)/86400000) % 14 === 0; }
+  if(rec === 'monthly-date'){ return d.getDate() === startD.getDate(); }
+  if(rec === 'monthly-weekday'){
+    if(d.getDay() !== startD.getDay()) return false;
+    const startIsLast = (startD.getDate() + 7) > daysInMonthOf(startD);
+    const dIsLast = (d.getDate() + 7) > daysInMonthOf(d);
+    if(startIsLast) return dIsLast;
+    return Math.ceil(startD.getDate()/7) === Math.ceil(d.getDate()/7);
+  }
+  if(rec === 'yearly'){ return d.getMonth() === startD.getMonth() && d.getDate() === startD.getDate(); }
+  return false;
+}
+function eventsOnDate(dateISO){ return state.events.filter(e => eventOccursOnDate(e, dateISO)); }
+function isEveryoneEvent(e){
+  const n = (e.assignees||[]).length;
+  return n===0 || (state.family.length>0 && n>=state.family.length);
+}
+function eventColor(e){ return isEveryoneEvent(e) ? 'var(--everyone)' : colorOf(e.assignees[0]); }
+let calPersonFilter = null;
+function passesPersonFilter(e){ if(!calPersonFilter) return true; return isEveryoneEvent(e) || (e.assignees||[]).includes(calPersonFilter); }
+function eventsOnDateFiltered(dateISO){ return eventsOnDate(dateISO).filter(passesPersonFilter); }
+function recurrenceLabel(rec){
+  return { daily:'repeats daily', weekly:'repeats weekly', biweekly:'repeats every 2 weeks',
+    'monthly-date':'repeats monthly', 'monthly-weekday':'repeats monthly', yearly:'repeats yearly' }[rec] || '';
+}
+
+/* ============================== TODAY TAB ============================== */
 function renderFamilyStrip(){
-  const el = document.getElementById('familyStrip');
-  el.innerHTML = state.family.map(m => `
-    <div class="chip"><span class="dot" style="background:${m.color}"></span>${m.name}</div>
-  `).join('');
+  document.getElementById('familyStrip').innerHTML = state.family.map(m => `
+    <div class="chip"><span class="dot" style="background:${m.color}"></span>${esc(m.name)}</div>`).join('');
 }
-
+function renderReminders(){
+  const el = document.getElementById('reminderList');
+  if(!state.reminders.length){ el.innerHTML = '<div class="empty-note">Nothing on the list.</div>'; return; }
+  el.innerHTML = state.reminders.map(r=>`
+    <div class="reminder-item">
+      <div class="check-btn ${r.done?'done':''}" data-rem-toggle="${r.id}">${r.done?'✓':''}</div>
+      <div class="item-label" style="${r.done?'text-decoration:line-through;color:var(--ink-soft);':''}">${esc(r.text)}</div>
+      <button class="del-x" data-rem-del="${r.id}">✕</button>
+    </div>`).join('');
+  el.querySelectorAll('[data-rem-toggle]').forEach(btn=> btn.addEventListener('click', ()=>{
+    const r = state.reminders.find(x=>x.id===btn.dataset.remToggle); if(!r) return;
+    r.done = !r.done; renderAll();
+    if(firebaseReady) dbWrite(db.collection('reminders').doc(r.id).update({done:r.done}));
+  }));
+  el.querySelectorAll('[data-rem-del]').forEach(btn=> btn.addEventListener('click', ()=> removeDoc('reminders', btn.dataset.remDel)));
+}
+document.getElementById('addReminderBtn').addEventListener('click', ()=>{
+  const modalRoot = document.getElementById('modalRoot');
+  modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">
+    <button class="close-x" id="closeModal">✕</button><h3>Add reminder</h3>
+    <div class="field"><label>What's the reminder?</label><input type="text" id="remText" placeholder="Send in field trip form"></div>
+    <div class="modal-actions"><button class="btn btn-primary" id="remSave">Save</button><button class="btn btn-secondary" id="remCancel">Cancel</button></div>
+  </div></div>`;
+  document.getElementById('closeModal').addEventListener('click', closeModal);
+  document.getElementById('remCancel').addEventListener('click', closeModal);
+  document.getElementById('backdrop').addEventListener('click', e=>{ if(e.target.id==='backdrop') closeModal(); });
+  document.getElementById('remSave').addEventListener('click', ()=>{
+    const text = document.getElementById('remText').value.trim(); if(!text) return;
+    const data = { text, done:false };
+    if(firebaseReady) dbWrite(db.collection('reminders').add(data)); else state.reminders.push({id:uid('local'), ...data});
+    renderAll(); closeModal();
+  });
+});
 function routineAppliesToday(r){
-  const dow = new Date().getDay(); // 0 Sun .. 6 Sat
-  if(r.schedule === 'daily') return true;
-  if(r.schedule === 'weekday') return dow >=1 && dow <=5;
-  if(r.schedule === 'weekend') return dow === 0 || dow === 6;
+  const dow = new Date().getDay();
+  if(r.schedule === 'weekday') return dow>=1 && dow<=5;
+  if(r.schedule === 'weekend') return dow===0 || dow===6;
   return true;
 }
-
 function renderRoutineColumns(){
   const el = document.getElementById('routineColumns');
   const kids = state.family.filter(m => m.role === 'child');
-  if(kids.length === 0){ el.innerHTML = '<div class="empty-note">Add family members in Settings to see routines here.</div>'; return; }
+  if(!kids.length){ el.innerHTML = '<div class="empty-note">Add family members in Settings to see routines here.</div>'; return; }
   el.innerHTML = kids.map(kid => {
     const items = state.routines.filter(r => routineAppliesToday(r) && (r.assignedTo||[]).includes(kid.id));
-    const rows = items.length ? items.map(r => {
-      const key = `${todayISO()}_${r.id}_${kid.id}`;
-      const done = !!state.routineLog[key];
-      return `<div class="routine-item">
-        <div class="check-btn ${done?'done':''}" data-routine="${r.id}" data-member="${kid.id}">${done?'✓':''}</div>
-        <div class="item-icon">${r.icon||'⭐'}</div>
-        <div class="item-label">${r.title}</div>
-      </div>`;
-    }).join('') : '<div class="empty-note">No routines assigned yet.</div>';
+    const groups = [['morning','Morning'],['evening','Evening'],['anytime','Anytime']];
+    let body = '';
+    groups.forEach(([key,label])=>{
+      const groupItems = items.filter(r => (r.timeOfDay||'anytime') === key);
+      if(!groupItems.length) return;
+      body += `<div class="subhead">${label}</div>`;
+      body += groupItems.map(r => {
+        const logKey = `${todayISO()}_${r.id}_${kid.id}`;
+        const done = !!state.routineLog[logKey];
+        return `<div class="routine-item">
+          <div class="check-btn ${done?'done':''}" data-routine="${r.id}" data-member="${kid.id}">${done?'✓':''}</div>
+          <div class="item-icon">${esc(r.icon||'⭐')}</div><div class="item-label">${esc(r.title)}</div></div>`;
+      }).join('');
+    });
+    if(!body) body = '<div class="empty-note">No routines assigned yet.</div>';
     return `<div class="member-card" style="border-top-color:${kid.color}">
-      <h3><span class="dot" style="width:16px;height:16px;background:${kid.color}"></span>${kid.name}</h3>
-      ${rows}
-    </div>`;
+      <h3><span class="dot" style="width:16px;height:16px;background:${kid.color}"></span>${esc(kid.name)}</h3>${body}</div>`;
   }).join('');
-
-  el.querySelectorAll('.check-btn').forEach(btn=>{
-    btn.addEventListener('click', ()=> toggleRoutine(btn.dataset.routine, btn.dataset.member));
-  });
+  el.querySelectorAll('.check-btn').forEach(btn=> btn.addEventListener('click', ()=> toggleRoutine(btn.dataset.routine, btn.dataset.member)));
 }
-
 function toggleRoutine(routineId, memberId){
   const key = `${todayISO()}_${routineId}_${memberId}`;
   const newVal = !state.routineLog[key];
   state.routineLog[key] = newVal;
   renderRoutineColumns();
-  if(firebaseReady){
-    db.collection('routineLog').doc(key).set({ date: todayISO(), routineId, memberId, done: newVal });
-  }
+  if(firebaseReady) dbWrite(db.collection('routineLog').doc(key).set({date:todayISO(), routineId, memberId, done:newVal}));
 }
-
 function renderChoreColumns(){
   const el = document.getElementById('choreColumns');
   const kids = state.family.filter(m => m.role === 'child');
   const assigned = state.chores.filter(c => c.type === 'assigned');
-  if(kids.length === 0 || assigned.length === 0){
+  if(!kids.length || !assigned.length){
     el.innerHTML = '<div class="empty-note">No assigned chores yet — add some in Settings, or check the Chores tab for the up-for-grabs pool.</div>';
     return;
   }
@@ -453,30 +490,20 @@ function renderChoreColumns(){
     if(!items.length) return '';
     const rows = items.map(c => `<div class="chore-item">
         <div class="check-btn ${c.status==='done'?'done':''}" data-chore="${c.id}">${c.status==='done'?'✓':''}</div>
-        <div class="item-icon">${c.icon||'🧹'}</div>
-        <div class="item-label">${c.title}</div>
-      </div>`).join('');
+        <div class="item-icon">${esc(c.icon||'🧹')}</div><div class="item-label">${esc(c.title)}</div></div>`).join('');
     return `<div class="member-card" style="border-top-color:${kid.color}">
-      <h3><span class="dot" style="width:16px;height:16px;background:${kid.color}"></span>${kid.name}</h3>
-      ${rows}
-    </div>`;
+      <h3><span class="dot" style="width:16px;height:16px;background:${kid.color}"></span>${esc(kid.name)}</h3>${rows}</div>`;
   }).join('');
-
-  el.querySelectorAll('.check-btn').forEach(btn=>{
-    btn.addEventListener('click', ()=> toggleChoreDone(btn.dataset.chore));
-  });
+  el.querySelectorAll('.check-btn').forEach(btn=> btn.addEventListener('click', ()=> toggleChoreDone(btn.dataset.chore)));
 }
-
 function toggleChoreDone(choreId){
-  const c = state.chores.find(x=>x.id===choreId);
-  if(!c) return;
-  const newStatus = c.status === 'done' ? 'open' : 'done';
-  c.status = newStatus;
+  const c = state.chores.find(x=>x.id===choreId); if(!c) return;
+  c.status = c.status === 'done' ? 'open' : 'done';
   renderChoreColumns();
-  if(firebaseReady) db.collection('chores').doc(choreId).update({ status: newStatus });
+  if(firebaseReady) dbWrite(db.collection('chores').doc(choreId).update({status:c.status}));
 }
 
-/* ============================== RENDER: CHORES / POOL ============================== */
+/* ============================== CHORES / POOL / EARNINGS ============================== */
 function renderPool(){
   const el = document.getElementById('poolGrid');
   const pool = state.chores.filter(c => c.type === 'pool');
@@ -485,63 +512,77 @@ function renderPool(){
   el.innerHTML = pool.map(c => {
     const claimedByM = c.claimedBy ? memberById(c.claimedBy) : null;
     let body;
-    if(c.status === 'done'){
-      body = `<span class="status-pill">Done by ${claimedByM?claimedByM.name:'someone'} ✓</span>`;
-    } else if(c.status === 'claimed' && claimedByM){
-      body = `<span class="status-pill">Claimed by ${claimedByM.name}</span>
+    if(c.status === 'done'){ body = `<span class="status-pill">Done by ${claimedByM?esc(claimedByM.name):'someone'} ✓</span>`; }
+    else if(c.status === 'claimed' && claimedByM){
+      body = `<span class="status-pill">Claimed by ${esc(claimedByM.name)}</span>
         <div class="claim-row">
           <button class="claim-btn" style="background:${claimedByM.color}" data-action="finish" data-chore="${c.id}">Mark done</button>
           <button class="claim-btn" style="background:#999" data-action="unclaim" data-chore="${c.id}">Unclaim</button>
         </div>`;
     } else {
-      body = `<div class="claim-row">${kids.map(k=>`
-        <button class="claim-btn" style="background:${k.color}" data-action="claim" data-chore="${c.id}" data-member="${k.id}">${k.name}</button>
-      `).join('')}</div>`;
+      body = `<div class="claim-row">${kids.map(k=>`<button class="claim-btn" style="background:${k.color}" data-action="claim" data-chore="${c.id}" data-member="${k.id}">${esc(k.name)}</button>`).join('')}</div>`;
     }
     return `<div class="pool-card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div><span class="item-icon">${c.icon||'🧹'}</span> <strong>${c.title}</strong></div>
+        <div><span class="item-icon">${esc(c.icon||'🧹')}</span> <strong>${esc(c.title)}</strong></div>
         <div class="amount">$${(c.value||0).toFixed(2)}</div>
-      </div>
-      ${body}
-    </div>`;
+      </div>${body}</div>`;
   }).join('');
-
   el.querySelectorAll('[data-action]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
-      const choreId = btn.dataset.chore;
-      const action = btn.dataset.action;
-      const c = state.chores.find(x=>x.id===choreId);
-      if(!c) return;
-      if(action==='claim'){
-        c.status='claimed'; c.claimedBy = btn.dataset.member;
-        if(firebaseReady) db.collection('chores').doc(choreId).update({status:'claimed', claimedBy: btn.dataset.member});
-      } else if(action==='unclaim'){
-        c.status='open'; c.claimedBy=null;
-        if(firebaseReady) db.collection('chores').doc(choreId).update({status:'open', claimedBy: null});
-      } else if(action==='finish'){
-        c.status='done';
-        if(firebaseReady) db.collection('chores').doc(choreId).update({status:'done'});
-        const earning = { memberId:c.claimedBy, amount: c.value||0, title:c.title, date: todayISO(), paid:false };
-        state.earnings.push({id:'local'+Date.now(), ...earning});
-        if(firebaseReady) db.collection('earnings').add(earning);
+      const choreId = btn.dataset.chore, action = btn.dataset.action;
+      const c = state.chores.find(x=>x.id===choreId); if(!c) return;
+      if(action==='claim'){ c.status='claimed'; c.claimedBy=btn.dataset.member;
+        if(firebaseReady) dbWrite(db.collection('chores').doc(choreId).update({status:'claimed', claimedBy:btn.dataset.member}));
+      } else if(action==='unclaim'){ c.status='open'; c.claimedBy=null;
+        if(firebaseReady) dbWrite(db.collection('chores').doc(choreId).update({status:'open', claimedBy:null}));
+      } else if(action==='finish'){ c.status='done';
+        if(firebaseReady) dbWrite(db.collection('chores').doc(choreId).update({status:'done'}));
+        const earning = { memberId:c.claimedBy, amount:c.value||0, title:c.title, date:todayISO(), paid:false };
+        state.earnings.push({id:uid('local'), ...earning});
+        if(firebaseReady) dbWrite(db.collection('earnings').add(earning));
       }
       renderAll();
     });
   });
 }
-
+function getPayPeriodRange(refDate){
+  const anchorStr = state.settings.payPeriodAnchor || todayISO();
+  const anchor = new Date(anchorStr+'T00:00:00');
+  const type = state.settings.payPeriodType || 'biweekly';
+  const ref = new Date(isoOf(refDate)+'T00:00:00');
+  if(type === 'monthly'){
+    const dom = anchor.getDate();
+    let start = new Date(ref.getFullYear(), ref.getMonth(), dom);
+    if(start > ref) start = new Date(ref.getFullYear(), ref.getMonth()-1, dom);
+    let end = new Date(start.getFullYear(), start.getMonth()+1, dom);
+    end.setDate(end.getDate()-1);
+    return {start, end};
+  }
+  const lengthDays = type === 'weekly' ? 7 : 14;
+  const msPerDay = 86400000;
+  let diffDays = Math.floor((ref - anchor)/msPerDay);
+  if(diffDays < 0) diffDays = diffDays - lengthDays*Math.floor(diffDays/lengthDays);
+  const periodIndex = Math.floor(diffDays/lengthDays);
+  const start = new Date(anchor.getTime() + periodIndex*lengthDays*msPerDay);
+  const end = new Date(start.getTime() + (lengthDays-1)*msPerDay);
+  return {start, end};
+}
 function renderEarnings(){
   const el = document.getElementById('earningsStrip');
   const kids = state.family.filter(m=>m.role==='child');
+  const {start,end} = getPayPeriodRange(new Date());
+  const label = document.getElementById('payPeriodLabel');
+  if(label) label.textContent = `${start.toLocaleDateString(undefined,{month:'short',day:'numeric'})} – ${end.toLocaleDateString(undefined,{month:'short',day:'numeric'})} · next payday ${new Date(end.getTime()+86400000).toLocaleDateString(undefined,{month:'short',day:'numeric'})}`;
   if(!kids.length){ el.innerHTML=''; return; }
+  const startISO = isoOf(start), endISO = isoOf(end);
   el.innerHTML = kids.map(kid=>{
-    const unpaid = state.earnings.filter(e=>e.memberId===kid.id && !e.paid);
-    const total = unpaid.reduce((s,e)=>s+(e.amount||0),0);
+    const periodEntries = state.earnings.filter(e=>e.memberId===kid.id && e.date>=startISO && e.date<=endISO);
+    const total = periodEntries.reduce((s,e)=>s+(e.amount||0),0);
+    const unpaid = periodEntries.filter(e=>!e.paid);
     return `<div class="earnings-card" style="border-top:4px solid ${kid.color}">
-      <div>${kid.name}</div>
-      <div class="amt">$${total.toFixed(2)}</div>
-      <div style="font-size:12px;color:var(--ink-soft)">${unpaid.length} chore${unpaid.length===1?'':'s'} unpaid</div>
+      <div>${esc(kid.name)}</div><div class="amt">$${total.toFixed(2)}</div>
+      <div style="font-size:12px;color:var(--ink-soft)">${periodEntries.length} chore${periodEntries.length===1?'':'s'} this period${unpaid.length?` · ${unpaid.length} unpaid`:''}</div>
       ${unpaid.length ? `<button class="mark-paid-btn" data-payout="${kid.id}">Mark paid</button>` : ''}
     </div>`;
   }).join('');
@@ -549,9 +590,9 @@ function renderEarnings(){
     btn.addEventListener('click', ()=>{
       const memberId = btn.dataset.payout;
       state.earnings.forEach(e=>{
-        if(e.memberId===memberId && !e.paid){
+        if(e.memberId===memberId && !e.paid && e.date>=startISO && e.date<=endISO){
           e.paid = true;
-          if(firebaseReady && !String(e.id).startsWith('local')) db.collection('earnings').doc(e.id).update({paid:true});
+          if(firebaseReady && !String(e.id).startsWith('local')) dbWrite(db.collection('earnings').doc(e.id).update({paid:true}));
         }
       });
       renderAll();
@@ -559,54 +600,126 @@ function renderEarnings(){
   });
 }
 
-/* ============================== RENDER: CALENDAR ============================== */
+/* ============================== CALENDAR ============================== */
+let calViewMode = 'month';
 let calCursor = new Date(); calCursor.setDate(1);
+let weekCursor = new Date();
+function startOfWeek(d){ const nd=new Date(d); nd.setHours(0,0,0,0); nd.setDate(nd.getDate()-nd.getDay()); return nd; }
 
 function renderCalendar(){
+  renderCalendarHeader();
+  renderPersonFilter();
+  if(calViewMode==='month') renderMonthGrid(); else renderWeekGrid();
+}
+function renderCalendarHeader(){
   const label = document.getElementById('calMonthLabel');
-  label.textContent = calCursor.toLocaleDateString(undefined,{month:'long', year:'numeric'});
+  if(calViewMode==='month'){
+    label.textContent = calCursor.toLocaleDateString(undefined,{month:'long', year:'numeric'});
+  } else {
+    const start = startOfWeek(weekCursor);
+    const end = new Date(start); end.setDate(end.getDate()+6);
+    label.textContent = start.getMonth()===end.getMonth()
+      ? `${start.toLocaleDateString(undefined,{month:'long'})} ${start.getDate()}–${end.getDate()}, ${end.getFullYear()}`
+      : `${start.toLocaleDateString(undefined,{month:'short',day:'numeric'})} – ${end.toLocaleDateString(undefined,{month:'short',day:'numeric'})}, ${end.getFullYear()}`;
+  }
+}
+function renderPersonFilter(){
+  const el = document.getElementById('personFilter');
+  const chips = [`<div class="pf-chip ${calPersonFilter===null?'on':''}" data-pf="all" style="${calPersonFilter===null?'background:var(--everyone);':''}">Everyone</div>`]
+    .concat(state.family.map(m=>`<div class="pf-chip ${calPersonFilter===m.id?'on':''}" data-pf="${m.id}" style="${calPersonFilter===m.id?`background:${m.color};`:''}">${esc(m.name)}</div>`));
+  el.innerHTML = chips.join('');
+  el.querySelectorAll('.pf-chip').forEach(c=>{
+    c.addEventListener('click', ()=>{ calPersonFilter = c.dataset.pf==='all' ? null : c.dataset.pf; renderCalendar(); });
+  });
+}
+document.querySelectorAll('.vt-btn').forEach(b=> b.addEventListener('click', ()=>{
+  calViewMode = b.dataset.view;
+  document.querySelectorAll('.vt-btn').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  renderCalendar();
+}));
+document.getElementById('calPrev').addEventListener('click', ()=>{
+  if(calViewMode==='month') calCursor.setMonth(calCursor.getMonth()-1); else weekCursor.setDate(weekCursor.getDate()-7);
+  renderCalendar();
+});
+document.getElementById('calNext').addEventListener('click', ()=>{
+  if(calViewMode==='month') calCursor.setMonth(calCursor.getMonth()+1); else weekCursor.setDate(weekCursor.getDate()+7);
+  renderCalendar();
+});
+document.getElementById('calAddBtn').addEventListener('click', ()=> openDayModal(todayISO()));
+
+function renderMonthGrid(){
   const grid = document.getElementById('calGrid');
+  grid.style.gridTemplateColumns = 'repeat(7, 1fr)';
   const firstDow = calCursor.getDay();
   const daysInMonth = new Date(calCursor.getFullYear(), calCursor.getMonth()+1, 0).getDate();
   const daysInPrevMonth = new Date(calCursor.getFullYear(), calCursor.getMonth(), 0).getDate();
-
   let cells = DOW.map(d=>`<div class="cal-dow">${d}</div>`).join('');
-
   const totalCells = Math.ceil((firstDow + daysInMonth)/7)*7;
   for(let i=0;i<totalCells;i++){
     let dayNum, monthOffset=0;
     if(i < firstDow){ dayNum = daysInPrevMonth - firstDow + i + 1; monthOffset=-1; }
     else if(i >= firstDow + daysInMonth){ dayNum = i - firstDow - daysInMonth + 1; monthOffset=1; }
     else { dayNum = i - firstDow + 1; }
-
     const cellDate = new Date(calCursor.getFullYear(), calCursor.getMonth()+monthOffset, dayNum);
-    const iso = cellDate.toISOString().slice(0,10);
+    const iso = isoOf(cellDate);
     const isToday = iso === todayISO();
-    const dayEvents = state.events.filter(e=>e.date===iso);
-    const evtHtml = dayEvents.slice(0,3).map(e=>{
-      const color = (e.assignees&&e.assignees[0]) ? colorOf(e.assignees[0]) : '#888';
-      return `<div class="cal-evt" style="background:${color}">${e.title}</div>`;
-    }).join('');
-
+    const dayEvents = eventsOnDateFiltered(iso);
+    const evtHtml = dayEvents.slice(0,3).map(e=> `<div class="cal-evt ${e.allDay?'allday':''}" style="background:${eventColor(e)}">${esc(e.title)}</div>`).join('');
     cells += `<div class="cal-cell ${monthOffset!==0?'other-month':''} ${isToday?'today':''}" data-date="${iso}">
-      <div class="cal-date-num">${dayNum}</div>
-      ${evtHtml}
+      <div class="cal-date-num">${dayNum}</div>${evtHtml}
       ${dayEvents.length>3?`<div style="font-size:11px;color:var(--ink-soft)">+${dayEvents.length-3} more</div>`:''}
     </div>`;
   }
   grid.innerHTML = cells;
-  grid.querySelectorAll('.cal-cell').forEach(cell=>{
-    cell.addEventListener('click', ()=> openDayModal(cell.dataset.date));
+  grid.querySelectorAll('.cal-cell').forEach(cell=> cell.addEventListener('click', ()=> openDayModal(cell.dataset.date)));
+}
+function renderWeekGrid(){
+  const grid = document.getElementById('calGrid');
+  grid.style.gridTemplateColumns = 'repeat(7, 1fr)';
+  const start = startOfWeek(weekCursor);
+  let html = '';
+  for(let i=0;i<7;i++){
+    const d = new Date(start); d.setDate(d.getDate()+i);
+    const iso = isoOf(d);
+    const isToday = iso===todayISO();
+    const dayEvents = eventsOnDateFiltered(iso);
+    html += `<div class="week-col ${isToday?'today':''}" data-date="${iso}">
+      <div class="week-col-head">${DOW[d.getDay()]}<span class="cal-date-num">${d.getDate()}</span></div>
+      ${dayEvents.length ? dayEvents.map(e=>`<div class="week-evt" style="background:${eventColor(e)}"><strong>${e.allDay?'All day':esc(e.startTime||'')}</strong> ${esc(e.title)}</div>`).join('') : ''}
+    </div>`;
+  }
+  grid.innerHTML = html;
+  grid.querySelectorAll('.week-col').forEach(col=> col.addEventListener('click', ()=> openDayModal(col.dataset.date)));
+}
+
+function iconPickerHtml(inputId, current){
+  return `<input type="text" id="${inputId}" value="${esc(current||ICONS[0])}"
+    placeholder="Tap the 🌐 / emoji key on your keyboard for the full picker"
+    style="width:100%;padding:10px;border:1px solid var(--paper-line);border-radius:8px;text-align:center;font-size:20px;margin-bottom:8px;">
+  <div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px;">or pick a quick one:</div>
+  <div class="icon-grid" id="${inputId}_grid">
+    ${ICONS.map(ic=>`<div class="icon-opt ${ic===current?'on':''}" data-icon="${ic}">${ic}</div>`).join('')}
+  </div>`;
+}
+function wireIconPicker(inputId){
+  const grid = document.getElementById(inputId+'_grid');
+  const input = document.getElementById(inputId);
+  grid.querySelectorAll('.icon-opt').forEach(opt=>{
+    opt.addEventListener('click', ()=>{
+      grid.querySelectorAll('.icon-opt').forEach(o=>o.classList.remove('on'));
+      opt.classList.add('on'); input.value = opt.dataset.icon;
+    });
   });
 }
-document.getElementById('calPrev').addEventListener('click', ()=>{ calCursor.setMonth(calCursor.getMonth()-1); renderCalendar(); });
-document.getElementById('calNext').addEventListener('click', ()=>{ calCursor.setMonth(calCursor.getMonth()+1); renderCalendar(); });
 
-/* ---------------- Day modal: view + add events ---------------- */
-function openDayModal(iso){
-  const dayEvents = state.events.filter(e=>e.date===iso);
+function openDayModal(iso, editEvent){
+  const dayEvents = eventsOnDate(iso);
   const dateLabel = new Date(iso+'T00:00:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
   const modalRoot = document.getElementById('modalRoot');
+  const isEdit = !!editEvent;
+  const rec = isEdit ? (editEvent.recurrence||'none') : 'none';
+
   modalRoot.innerHTML = `
     <div class="modal-backdrop" id="backdrop">
       <div class="modal">
@@ -615,224 +728,341 @@ function openDayModal(iso){
         <div id="eventListArea">
           ${dayEvents.length ? dayEvents.map(e=>`
             <div class="list-row">
-              <div class="dot" style="background:${(e.assignees&&e.assignees[0])?colorOf(e.assignees[0]):'#999'}"></div>
-              <div class="grow">
-                <strong>${e.title}</strong><br>
-                <span style="font-size:13px;color:var(--ink-soft)">${e.startTime||''}${e.endTime?' – '+e.endTime:''}${e.workBlock?' · blocks work calendar':''}</span>
+              <div class="dot" style="background:${eventColor(e)}"></div>
+              <div class="grow"><strong>${esc(e.title)}</strong><br>
+                <span style="font-size:13px;color:var(--ink-soft)">
+                  ${e.allDay ? 'All day' : `${e.startTime||''}${e.endTime?' – '+e.endTime:''}`}
+                  ${e.endDate && e.endDate!==e.date ? ' · through '+new Date(e.endDate+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}) : ''}
+                  ${e.recurrence && e.recurrence!=='none' ? ' · '+recurrenceLabel(e.recurrence) : ''}
+                  ${e.workBlock ? ' · blocks work calendar' : ''}
+                </span>
               </div>
-              <button class="small-btn" data-del="${e.id}">Delete</button>
+              <div class="evt-row-actions">
+                <button class="small-btn" data-edit="${e.id}">Edit</button>
+                <button class="small-btn" data-del="${e.id}">Delete</button>
+              </div>
             </div>
           `).join('') : '<div class="empty-note">Nothing scheduled yet.</div>'}
         </div>
-        <div class="section-title" style="font-size:16px;margin-top:20px;">Add event</div>
-        <div class="field"><label>Title</label><input type="text" id="newEvtTitle" placeholder="Piano lesson"></div>
-        <div class="field"><label>Start time</label><input type="time" id="newEvtStart"></div>
-        <div class="field"><label>End time</label><input type="time" id="newEvtEnd"></div>
+        <div class="section-title" style="font-size:16px;margin-top:20px;">${isEdit?'Edit event':'Add event'}</div>
+        <div class="field"><label>Title</label><input type="text" id="newEvtTitle" placeholder="Piano lesson" value="${isEdit?esc(editEvent.title):''}"></div>
+
+        <div class="checkbox-row"><input type="checkbox" id="allDayCheck" ${isEdit&&editEvent.allDay?'checked':''}><label for="allDayCheck">All day</label></div>
+
+        <div id="timeFields" class="${isEdit&&editEvent.allDay?'hidden':''}">
+          <div class="field"><label>Start time</label><input type="time" id="newEvtStart" value="${isEdit?(editEvent.startTime||''):''}"></div>
+          <div class="field"><label>End time</label><input type="time" id="newEvtEnd" value="${isEdit?(editEvent.endTime||''):''}"></div>
+        </div>
+
+        <div class="field"><label>Repeats</label>
+          <select id="newEvtRepeat">
+            <option value="none" ${rec==='none'?'selected':''}>Doesn't repeat</option>
+            <option value="daily" ${rec==='daily'?'selected':''}>Every day</option>
+            <option value="weekly" ${rec==='weekly'?'selected':''}>Every week</option>
+            <option value="biweekly" ${rec==='biweekly'?'selected':''}>Every 2 weeks</option>
+            <option value="monthly-date" ${rec==='monthly-date'?'selected':''}>Monthly (same date)</option>
+            <option value="monthly-weekday" ${rec==='monthly-weekday'?'selected':''}>Monthly (same weekday — "1st Tuesday")</option>
+            <option value="yearly" ${rec==='yearly'?'selected':''}>Every year (birthdays, holidays)</option>
+          </select>
+        </div>
+
+        <div class="field" id="endDateField" style="${rec!=='none'?'display:none;':''}"><label>Lasts through (only if more than one day — e.g. a trip)</label>
+          <input type="date" id="newEvtEndDate" value="${isEdit&&editEvent.endDate&&editEvent.endDate!==editEvent.date?editEvent.endDate:''}"></div>
+
         <div class="field">
-          <label>Who</label>
+          <label>Who (leave blank, or select everyone, for a reminder like a holiday)</label>
           <div class="assignee-toggles" id="assigneeToggles">
-            ${state.family.map(m=>`<div class="assignee-toggle" data-member="${m.id}" style="--c:${m.color}">${m.name}</div>`).join('')}
+            ${state.family.map(m=>{
+              const on = isEdit && (editEvent.assignees||[]).includes(m.id);
+              return `<div class="assignee-toggle" data-member="${m.id}" style="--c:${m.color};${on?`background:${m.color};border-color:${m.color};color:white;`:''}">${esc(m.name)}</div>`;
+            }).join('')}
           </div>
         </div>
-        <div class="field checkbox-row">
-          <input type="checkbox" id="workBlockCheck">
-          <label style="margin:0;font-weight:400;" for="workBlockCheck">Add to work calendar (blocks time in Outlook)</label>
+        <div class="checkbox-row">
+          <input type="checkbox" id="workBlockCheck" ${isEdit&&editEvent.workBlock?'checked':''}>
+          <label for="workBlockCheck">Add to work calendar (blocks time in Outlook)</label>
         </div>
         <div class="modal-actions">
-          <button class="btn btn-primary" id="saveEvtBtn">Save event</button>
+          <button class="btn btn-primary" id="saveEvtBtn">${isEdit?'Save changes':'Save event'}</button>
+          ${isEdit?`<button class="btn btn-danger" id="deleteFromEditBtn">Delete</button>`:''}
           <button class="btn btn-secondary" id="cancelEvtBtn">Cancel</button>
         </div>
       </div>
     </div>
   `;
-  const selected = new Set();
+
+  const selected = new Set(isEdit ? (editEvent.assignees||[]) : []);
   modalRoot.querySelectorAll('.assignee-toggle').forEach(t=>{
     t.addEventListener('click', ()=>{
       const id = t.dataset.member;
-      if(selected.has(id)){ selected.delete(id); t.classList.remove('on'); t.style.background=''; t.style.borderColor=''; }
-      else { selected.add(id); t.classList.add('on'); t.style.background = t.style.getPropertyValue('--c'); t.style.borderColor = t.style.getPropertyValue('--c'); }
+      if(selected.has(id)){ selected.delete(id); t.style.background=''; t.style.borderColor=''; t.style.color=''; }
+      else { selected.add(id); t.style.background = t.style.getPropertyValue('--c'); t.style.borderColor = t.style.getPropertyValue('--c'); t.style.color='white'; }
     });
+  });
+  document.getElementById('allDayCheck').addEventListener('change', (e)=>{
+    document.getElementById('timeFields').classList.toggle('hidden', e.target.checked);
+  });
+  document.getElementById('newEvtRepeat').addEventListener('change', (e)=>{
+    document.getElementById('endDateField').style.display = e.target.value==='none' ? '' : 'none';
   });
   document.getElementById('closeModal').addEventListener('click', closeModal);
   document.getElementById('cancelEvtBtn').addEventListener('click', closeModal);
   document.getElementById('backdrop').addEventListener('click', (e)=>{ if(e.target.id==='backdrop') closeModal(); });
-  modalRoot.querySelectorAll('[data-del]').forEach(btn=>{
-    btn.addEventListener('click', ()=> deleteEvent(btn.dataset.del, iso));
+  modalRoot.querySelectorAll('[data-del]').forEach(btn=> btn.addEventListener('click', ()=> deleteEvent(btn.dataset.del, iso)));
+  modalRoot.querySelectorAll('[data-edit]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ const evt = state.events.find(e=>e.id===btn.dataset.edit); if(evt) openDayModal(iso, evt); });
   });
+  if(isEdit) document.getElementById('deleteFromEditBtn').addEventListener('click', ()=> deleteEvent(editEvent.id, iso));
+
   document.getElementById('saveEvtBtn').addEventListener('click', ()=>{
     const title = document.getElementById('newEvtTitle').value.trim();
-    if(!title){ alert('Give the event a title first.'); return; }
-    const startTime = document.getElementById('newEvtStart').value;
-    const endTime = document.getElementById('newEvtEnd').value;
+    if(!title){ showToast('Give the event a title first.'); return; }
+    const allDay = document.getElementById('allDayCheck').checked;
+    const startTime = allDay ? '' : document.getElementById('newEvtStart').value;
+    const endTime = allDay ? '' : document.getElementById('newEvtEnd').value;
+    const recurrence = document.getElementById('newEvtRepeat').value;
+    const endDateVal = recurrence==='none' ? document.getElementById('newEvtEndDate').value : '';
     const workBlock = document.getElementById('workBlockCheck').checked;
-    saveEvent({ title, date: iso, startTime, endTime, assignees: Array.from(selected), workBlock });
+    const data = { title, date: iso, endDate: endDateVal || iso, allDay, startTime, endTime, recurrence, assignees: Array.from(selected), workBlock };
+    if(isEdit) updateEvent(editEvent.id, data); else saveEvent(data);
     closeModal();
   });
 }
 function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
 
 function saveEvent(evt){
-  const tag = `FAMILYAPP-${evt.date}-${evt.title.replace(/\s+/g,'').slice(0,20)}-${Date.now()}`;
-  evt.tag = tag;
-  const localId = 'local'+Date.now();
+  const localId = uid('local');
+  if(evt.workBlock) evt.tag = `FAMILYAPP-${evt.date}-${evt.title.replace(/\s+/g,'').slice(0,20)}-${Date.now()}`;
   state.events.push({ id: localId, ...evt });
   renderAll();
-  if(firebaseReady){
-    db.collection('events').add(evt);
-  }
-  if(evt.workBlock){
-    sendWorkBlockEmail(evt, 'ADD');
-  }
+  if(firebaseReady) dbWrite(db.collection('events').add(evt));
+  if(evt.workBlock) sendWorkBlockEmail(evt, 'ADD');
 }
-
+function updateEvent(id, data){
+  const idx = state.events.findIndex(e=>e.id===id);
+  const old = state.events[idx];
+  if(old && old.workBlock) sendWorkBlockEmail(old, 'REMOVE');
+  if(data.workBlock) data.tag = `FAMILYAPP-${data.date}-${data.title.replace(/\s+/g,'').slice(0,20)}-${Date.now()}`;
+  if(idx>-1) state.events[idx] = { ...old, ...data };
+  renderAll();
+  if(firebaseReady && !String(id).startsWith('local')) dbWrite(db.collection('events').doc(id).update(data));
+  if(data.workBlock) sendWorkBlockEmail(data, 'ADD');
+}
 function deleteEvent(id, dayIso){
   const evt = state.events.find(e=>e.id===id);
   state.events = state.events.filter(e=>e.id!==id);
-  if(firebaseReady && !String(id).startsWith('local')) db.collection('events').doc(id).delete();
-  if(evt && evt.workBlock){ sendWorkBlockEmail(evt, 'REMOVE'); }
-  openDayModal(dayIso);
+  if(firebaseReady && !String(id).startsWith('local')) dbWrite(db.collection('events').doc(id).delete());
+  if(evt && evt.workBlock) sendWorkBlockEmail(evt, 'REMOVE');
   renderCalendar();
+  openDayModal(dayIso);
+}
+function sendWorkBlockEmail(evt, action){
+  if(!emailjsConfig.publicKey || !emailjsConfig.serviceId || !emailjsConfig.templateId){ console.warn('EmailJS not configured — skipping.'); return; }
+  if(typeof emailjs === 'undefined'){ console.warn('EmailJS library not loaded.'); return; }
+  const toEmail = state.settings.workEmailTo || '';
+  if(!toEmail){ console.warn('No work-calendar email set in Settings — skipping.'); return; }
+  const subjectTag = action === 'ADD' ? '[FAMILYBLOCK]' : '[FAMILYBLOCK-REMOVE]';
+  const bodyLines = [`TAG: ${evt.tag}`, `TITLE: ${evt.title}`, `DATE: ${evt.date}`, `END DATE: ${evt.endDate||evt.date}`, `START: ${evt.startTime||''}`, `END: ${evt.endTime||''}`].join('\n');
+  emailjs.send(emailjsConfig.serviceId, emailjsConfig.templateId, { to_email: toEmail, subject:`${subjectTag} ${evt.title}`, body: bodyLines }, emailjsConfig.publicKey)
+    .catch(err => console.error('EmailJS send failed', err));
 }
 
-/* ---------------- EmailJS trigger for work-calendar block/unblock ---------------- */
-function sendWorkBlockEmail(evt, action){
-  if(!emailjsConfig.publicKey || !emailjsConfig.serviceId || !emailjsConfig.templateId){
-    console.warn('EmailJS not configured — skipping work calendar email. See SETUP.md.');
-    return;
-  }
-  const subjectTag = action === 'ADD' ? '[FAMILYBLOCK]' : '[FAMILYBLOCK-REMOVE]';
-  const bodyLines = [
-    `TAG: ${evt.tag}`,
-    `TITLE: ${evt.title}`,
-    `DATE: ${evt.date}`,
-    `START: ${evt.startTime || ''}`,
-    `END: ${evt.endTime || ''}`
-  ].join('\n');
-  if(typeof emailjs === 'undefined'){
-    console.warn('EmailJS library not loaded.');
-    return;
-  }
-  emailjs.send(emailjsConfig.serviceId, emailjsConfig.templateId, {
-    subject: `${subjectTag} ${evt.title}`,
-    body: bodyLines
-  }, emailjsConfig.publicKey).catch(err => console.error('EmailJS send failed', err));
+/* ============================== FAMILY / ROUTINE / CHORE MODALS ============================== */
+function openFamilyModal(existing){
+  const isEdit = !!existing;
+  const modalRoot = document.getElementById('modalRoot');
+  modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">
+    <button class="close-x" id="closeModal">✕</button>
+    <h3>${isEdit?'Edit family member':'Add family member'}</h3>
+    <div class="field"><label>Name</label><input type="text" id="famName" value="${isEdit?esc(existing.name):''}"></div>
+    <div class="field"><label>Role</label><select id="famRole">
+      <option value="parent" ${isEdit&&existing.role==='parent'?'selected':''}>Parent</option>
+      <option value="child" ${isEdit&&existing.role==='child'?'selected':''}>Child</option>
+    </select></div>
+    <div class="field"><label>Color</label><input type="color" id="famColor" value="${isEdit?existing.color:'#'+Math.floor(Math.random()*16777215).toString(16).padStart(6,'0')}"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="famSave">Save</button>
+      ${isEdit?'<button class="btn btn-danger" id="famDelete">Remove</button>':''}
+      <button class="btn btn-secondary" id="famCancel">Cancel</button>
+    </div>
+  </div></div>`;
+  document.getElementById('closeModal').addEventListener('click', closeModal);
+  document.getElementById('famCancel').addEventListener('click', closeModal);
+  document.getElementById('backdrop').addEventListener('click', e=>{ if(e.target.id==='backdrop') closeModal(); });
+  document.getElementById('famSave').addEventListener('click', ()=>{
+    const name = document.getElementById('famName').value.trim();
+    if(!name){ showToast('Name it first.'); return; }
+    const data = { name, role: document.getElementById('famRole').value, color: document.getElementById('famColor').value };
+    if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('family').doc(existing.id).update(data)); }
+    else { data.order = state.family.length; if(firebaseReady) dbWrite(db.collection('family').add(data)); else state.family.push({id:uid('local'), ...data}); }
+    renderAll(); closeModal();
+  });
+  if(isEdit) document.getElementById('famDelete').addEventListener('click', ()=>{ removeDoc('family', existing.id); closeModal(); });
+}
+function openRoutineModal(existing){
+  const isEdit = !!existing;
+  const kids = state.family.filter(m=>m.role==='child');
+  const modalRoot = document.getElementById('modalRoot');
+  modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">
+    <button class="close-x" id="closeModal">✕</button>
+    <h3>${isEdit?'Edit routine':'Add routine'}</h3>
+    <div class="field"><label>Title</label><input type="text" id="rtTitle" placeholder="Brush teeth" value="${isEdit?esc(existing.title):''}"></div>
+    <div class="field"><label>Icon</label>${iconPickerHtml('rtIcon', isEdit?existing.icon:'⭐')}</div>
+    <div class="field"><label>Time of day</label><select id="rtTimeOfDay">
+      <option value="morning" ${isEdit&&existing.timeOfDay==='morning'?'selected':''}>Morning</option>
+      <option value="evening" ${isEdit&&existing.timeOfDay==='evening'?'selected':''}>Evening</option>
+      <option value="anytime" ${!isEdit||!existing.timeOfDay||existing.timeOfDay==='anytime'?'selected':''}>Anytime</option>
+    </select></div>
+    <div class="field"><label>Which days</label><select id="rtSchedule">
+      <option value="daily" ${!isEdit||existing.schedule==='daily'?'selected':''}>Every day</option>
+      <option value="weekday" ${isEdit&&existing.schedule==='weekday'?'selected':''}>Weekdays only</option>
+      <option value="weekend" ${isEdit&&existing.schedule==='weekend'?'selected':''}>Weekends only</option>
+    </select></div>
+    <div class="field"><label>Who</label><div class="assignee-toggles" id="rtAssignees">
+      ${kids.map(k=>{ const on = isEdit && (existing.assignedTo||[]).includes(k.id);
+        return `<div class="assignee-toggle" data-member="${k.id}" style="--c:${k.color};${on?`background:${k.color};border-color:${k.color};color:white;`:''}">${esc(k.name)}</div>`; }).join('')}
+    </div></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="rtSave">Save</button>
+      ${isEdit?'<button class="btn btn-danger" id="rtDelete">Remove</button>':''}
+      <button class="btn btn-secondary" id="rtCancel">Cancel</button>
+    </div>
+  </div></div>`;
+  wireIconPicker('rtIcon');
+  const selected = new Set(isEdit ? (existing.assignedTo||[]) : []);
+  modalRoot.querySelectorAll('#rtAssignees .assignee-toggle').forEach(t=>{
+    t.addEventListener('click', ()=>{
+      const id = t.dataset.member;
+      if(selected.has(id)){ selected.delete(id); t.style.background=''; t.style.borderColor=''; t.style.color=''; }
+      else { selected.add(id); t.style.background=t.style.getPropertyValue('--c'); t.style.borderColor=t.style.getPropertyValue('--c'); t.style.color='white'; }
+    });
+  });
+  document.getElementById('closeModal').addEventListener('click', closeModal);
+  document.getElementById('rtCancel').addEventListener('click', closeModal);
+  document.getElementById('backdrop').addEventListener('click', e=>{ if(e.target.id==='backdrop') closeModal(); });
+  document.getElementById('rtSave').addEventListener('click', ()=>{
+    const title = document.getElementById('rtTitle').value.trim();
+    if(!title){ showToast('Name the routine first.'); return; }
+    const data = { title, icon: document.getElementById('rtIcon').value.trim()||'⭐', schedule: document.getElementById('rtSchedule').value, timeOfDay: document.getElementById('rtTimeOfDay').value, assignedTo: Array.from(selected) };
+    if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('routines').doc(existing.id).update(data)); }
+    else { if(firebaseReady) dbWrite(db.collection('routines').add(data)); else state.routines.push({id:uid('local'), ...data}); }
+    renderAll(); closeModal();
+  });
+  if(isEdit) document.getElementById('rtDelete').addEventListener('click', ()=>{ removeDoc('routines', existing.id); closeModal(); });
+}
+function openChoreModal(existing){
+  const isEdit = !!existing;
+  const kids = state.family.filter(m=>m.role==='child');
+  const modalRoot = document.getElementById('modalRoot');
+  const type = isEdit ? existing.type : 'pool';
+  modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">
+    <button class="close-x" id="closeModal">✕</button>
+    <h3>${isEdit?'Edit chore':'Add chore'}</h3>
+    <div class="field"><label>Title</label><input type="text" id="chTitle" placeholder="Load dishwasher" value="${isEdit?esc(existing.title):''}"></div>
+    <div class="field"><label>Icon</label>${iconPickerHtml('chIcon', isEdit?existing.icon:'🧹')}</div>
+    <div class="radio-row">
+      <label><input type="radio" name="chType" value="pool" ${type==='pool'?'checked':''}> Up for grabs (pays $)</label>
+      <label><input type="radio" name="chType" value="assigned" ${type==='assigned'?'checked':''}> Assigned, no pay</label>
+    </div>
+    <div class="field" id="chValueField" style="${type==='pool'?'':'display:none;'}"><label>Amount</label><input type="number" step="0.25" min="0" id="chValue" value="${isEdit&&existing.value!=null?existing.value:'1'}"></div>
+    <div class="field" id="chAssignField" style="${type==='assigned'?'':'display:none;'}"><label>Assign to</label><select id="chAssignee">
+      ${kids.map(k=>`<option value="${k.id}" ${isEdit&&existing.assignedTo===k.id?'selected':''}>${esc(k.name)}</option>`).join('')}
+    </select></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="chSave">Save</button>
+      ${isEdit?'<button class="btn btn-danger" id="chDelete">Remove</button>':''}
+      <button class="btn btn-secondary" id="chCancel">Cancel</button>
+    </div>
+  </div></div>`;
+  wireIconPicker('chIcon');
+  modalRoot.querySelectorAll('input[name=chType]').forEach(r=>{
+    r.addEventListener('change', ()=>{
+      const v = modalRoot.querySelector('input[name=chType]:checked').value;
+      document.getElementById('chValueField').style.display = v==='pool' ? '' : 'none';
+      document.getElementById('chAssignField').style.display = v==='assigned' ? '' : 'none';
+    });
+  });
+  document.getElementById('closeModal').addEventListener('click', closeModal);
+  document.getElementById('chCancel').addEventListener('click', closeModal);
+  document.getElementById('backdrop').addEventListener('click', e=>{ if(e.target.id==='backdrop') closeModal(); });
+  document.getElementById('chSave').addEventListener('click', ()=>{
+    const title = document.getElementById('chTitle').value.trim();
+    if(!title){ showToast('Name the chore first.'); return; }
+    const chosenType = modalRoot.querySelector('input[name=chType]:checked').value;
+    let data;
+    if(chosenType==='pool'){
+      data = { title, icon: document.getElementById('chIcon').value.trim()||'🧹', type:'pool', value: parseFloat(document.getElementById('chValue').value)||0, status: isEdit&&existing.status?existing.status:'open', assignedTo:null, claimedBy: isEdit?existing.claimedBy||null:null };
+    } else {
+      const kidSelect = document.getElementById('chAssignee');
+      data = { title, icon: document.getElementById('chIcon').value.trim()||'🧹', type:'assigned', assignedTo: kidSelect ? kidSelect.value : null, status: isEdit&&existing.status?existing.status:'open' };
+    }
+    if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('chores').doc(existing.id).update(data)); }
+    else { if(firebaseReady) dbWrite(db.collection('chores').add(data)); else state.chores.push({id:uid('local'), ...data}); }
+    renderAll(); closeModal();
+  });
+  if(isEdit) document.getElementById('chDelete').addEventListener('click', ()=>{ removeDoc('chores', existing.id); closeModal(); });
 }
 
 /* ============================== SETTINGS ============================== */
 function renderSettings(){
-  // Family
   const famEl = document.getElementById('familyList');
   famEl.innerHTML = state.family.map(m=>`
     <div class="list-row">
       <span class="dot" style="background:${m.color}"></span>
-      <div class="grow">
-        <input type="text" value="${m.name}" data-fam-name="${m.id}" style="border:none;background:none;font-weight:600;font-size:15px;width:100%;">
-      </div>
-      <select data-fam-role="${m.id}">
-        <option value="parent" ${m.role==='parent'?'selected':''}>Parent</option>
-        <option value="child" ${m.role==='child'?'selected':''}>Child</option>
-      </select>
-      <input type="color" value="${m.color}" data-fam-color="${m.id}">
-      <button class="small-btn" data-fam-del="${m.id}">Remove</button>
-    </div>
-  `).join('');
-  famEl.querySelectorAll('[data-fam-name]').forEach(inp=> inp.addEventListener('change', ()=> updateFamily(inp.dataset.famName, {name:inp.value})));
-  famEl.querySelectorAll('[data-fam-role]').forEach(sel=> sel.addEventListener('change', ()=> updateFamily(sel.dataset.famRole, {role:sel.value})));
-  famEl.querySelectorAll('[data-fam-color]').forEach(inp=> inp.addEventListener('change', ()=> updateFamily(inp.dataset.famColor, {color:inp.value})));
-  famEl.querySelectorAll('[data-fam-del]').forEach(btn=> btn.addEventListener('click', ()=> removeDoc('family', btn.dataset.famDel)));
+      <div class="grow"><strong>${esc(m.name)}</strong> <span class="status-pill">${m.role}</span></div>
+      <button class="small-btn" data-fam-edit="${m.id}">Edit</button>
+    </div>`).join('');
+  famEl.querySelectorAll('[data-fam-edit]').forEach(btn=> btn.addEventListener('click', ()=> openFamilyModal(memberById(btn.dataset.famEdit))));
 
-  // Routines
   const rEl = document.getElementById('routineList');
-  rEl.innerHTML = state.routines.map(r=>`
-    <div class="list-row">
-      <span class="item-icon">${r.icon||'⭐'}</span>
-      <div class="grow">${r.title}</div>
-      <select data-rt-sched="${r.id}">
-        <option value="daily" ${r.schedule==='daily'?'selected':''}>Every day</option>
-        <option value="weekday" ${r.schedule==='weekday'?'selected':''}>Weekdays</option>
-        <option value="weekend" ${r.schedule==='weekend'?'selected':''}>Weekends</option>
-      </select>
-      <div class="assignee-toggles">
-        ${state.family.filter(m=>m.role==='child').map(k=>`
-          <div class="assignee-toggle ${((r.assignedTo||[]).includes(k.id))?'on':''}" data-rt-assign="${r.id}" data-member="${k.id}"
-            style="${((r.assignedTo||[]).includes(k.id))?`background:${k.color};border-color:${k.color};`:''}">${k.name}</div>
-        `).join('')}
-      </div>
-      <button class="small-btn" data-rt-del="${r.id}">Remove</button>
-    </div>
-  `).join('');
-  rEl.querySelectorAll('[data-rt-sched]').forEach(sel=> sel.addEventListener('change', ()=> updateRoutine(sel.dataset.rtSched, {schedule:sel.value})));
-  rEl.querySelectorAll('[data-rt-assign]').forEach(tog=> tog.addEventListener('click', ()=>{
-    const r = state.routines.find(x=>x.id===tog.dataset.rtAssign);
-    const memberId = tog.dataset.member;
-    const set = new Set(r.assignedTo||[]);
-    if(set.has(memberId)) set.delete(memberId); else set.add(memberId);
-    updateRoutine(r.id, {assignedTo: Array.from(set)});
-  }));
-  rEl.querySelectorAll('[data-rt-del]').forEach(btn=> btn.addEventListener('click', ()=> removeDoc('routines', btn.dataset.rtDel)));
+  rEl.innerHTML = state.routines.map(r=>{
+    const names = (r.assignedTo||[]).map(id=> memberById(id)?.name).filter(Boolean).join(', ') || 'nobody yet';
+    const scheduleLabel = r.schedule==='weekday'?'Weekdays':r.schedule==='weekend'?'Weekends':'Every day';
+    const todLabel = r.timeOfDay==='morning'?'Morning':r.timeOfDay==='evening'?'Evening':'Anytime';
+    return `<div class="list-row">
+      <span class="item-icon">${esc(r.icon||'⭐')}</span>
+      <div class="grow"><strong>${esc(r.title)}</strong> <span class="status-pill">${todLabel} · ${scheduleLabel} · ${esc(names)}</span></div>
+      <button class="small-btn" data-rt-edit="${r.id}">Edit</button>
+    </div>`;
+  }).join('');
+  rEl.querySelectorAll('[data-rt-edit]').forEach(btn=> btn.addEventListener('click', ()=> openRoutineModal(state.routines.find(x=>x.id===btn.dataset.rtEdit))));
 
-  // Chores
   const cEl = document.getElementById('choreList');
   cEl.innerHTML = state.chores.map(c=>`
     <div class="list-row">
-      <span class="item-icon">${c.icon||'🧹'}</span>
-      <div class="grow">${c.title} ${c.type==='pool' ? `<span style="color:var(--accent);font-weight:700;">$${(c.value||0).toFixed(2)}</span>`:''}</div>
-      <span class="status-pill">${c.type==='pool'?'Up for grabs':'Assigned: '+(memberById(c.assignedTo)?.name||'—')}</span>
-      <button class="small-btn" data-ch-del="${c.id}">Remove</button>
-    </div>
-  `).join('');
-  cEl.querySelectorAll('[data-ch-del]').forEach(btn=> btn.addEventListener('click', ()=> removeDoc('chores', btn.dataset.chDel)));
-}
+      <span class="item-icon">${esc(c.icon||'🧹')}</span>
+      <div class="grow"><strong>${esc(c.title)}</strong> ${c.type==='pool' ? `<span style="color:var(--accent);font-weight:700;">$${(c.value||0).toFixed(2)}</span>`:''}
+        <span class="status-pill">${c.type==='pool'?'Up for grabs':'Assigned: '+(memberById(c.assignedTo)?.name||'—')}</span></div>
+      <button class="small-btn" data-ch-edit="${c.id}">Edit</button>
+    </div>`).join('');
+  cEl.querySelectorAll('[data-ch-edit]').forEach(btn=> btn.addEventListener('click', ()=> openChoreModal(state.chores.find(x=>x.id===btn.dataset.chEdit))));
 
-function updateFamily(id, patch){
-  const m = state.family.find(x=>x.id===id); if(m) Object.assign(m, patch);
-  renderAll();
-  if(firebaseReady) db.collection('family').doc(id).update(patch);
-}
-function updateRoutine(id, patch){
-  const r = state.routines.find(x=>x.id===id); if(r) Object.assign(r, patch);
-  renderAll();
-  if(firebaseReady) db.collection('routines').doc(id).update(patch);
+  const anchorInput = document.getElementById('payAnchorInput');
+  const typeInput = document.getElementById('payTypeInput');
+  if(anchorInput && document.activeElement !== anchorInput) anchorInput.value = state.settings.payPeriodAnchor || todayISO();
+  if(typeInput && document.activeElement !== typeInput) typeInput.value = state.settings.payPeriodType || 'biweekly';
+  const workEmailInput = document.getElementById('workEmailInput');
+  if(workEmailInput && document.activeElement !== workEmailInput) workEmailInput.value = state.settings.workEmailTo || '';
 }
 function removeDoc(collection, id){
   state[collection] = state[collection].filter(x=>x.id!==id);
   renderAll();
-  if(firebaseReady) db.collection(collection).doc(id).delete();
+  if(firebaseReady) dbWrite(db.collection(collection).doc(id).delete());
 }
-
-/* ---------------- Add buttons (settings) ---------------- */
-document.getElementById('addFamilyBtn').addEventListener('click', ()=>{
-  const name = prompt('Name?'); if(!name) return;
-  const role = confirm('Is this a parent? OK = parent, Cancel = child') ? 'parent' : 'child';
-  const color = '#'+Math.floor(Math.random()*16777215).toString(16).padStart(6,'0');
-  const doc = { name, role, color, order: state.family.length };
-  if(firebaseReady){ db.collection('family').add(doc); }
-  else { state.family.push({id:'local'+Date.now(), ...doc}); renderAll(); }
+document.getElementById('addFamilyBtn').addEventListener('click', ()=> openFamilyModal(null));
+document.getElementById('addRoutineBtn').addEventListener('click', ()=> openRoutineModal(null));
+document.getElementById('addChoreBtn').addEventListener('click', ()=> openChoreModal(null));
+document.getElementById('savePayoutBtn').addEventListener('click', ()=>{
+  const data = Object.assign({}, state.settings, { payPeriodAnchor: document.getElementById('payAnchorInput').value || todayISO(), payPeriodType: document.getElementById('payTypeInput').value });
+  state.settings = data;
+  if(firebaseReady) dbWrite(db.collection('settings').doc('main').set(data, {merge:true}));
+  renderAll();
 });
-document.getElementById('addRoutineBtn').addEventListener('click', ()=>{
-  const title = prompt('Routine name? (e.g. Brush teeth)'); if(!title) return;
-  const icon = prompt('Pick an emoji for it (optional)', '⭐') || '⭐';
-  const doc = { title, icon, schedule:'daily', assignedTo: [] };
-  if(firebaseReady){ db.collection('routines').add(doc); }
-  else { state.routines.push({id:'local'+Date.now(), ...doc}); renderAll(); }
-});
-document.getElementById('addChoreBtn').addEventListener('click', ()=>{
-  const title = prompt('Chore name?'); if(!title) return;
-  const isPool = confirm('Is this an "up for grabs" chore with a $ value? OK = yes, Cancel = assigned to one person, no pay');
-  const icon = prompt('Pick an emoji for it (optional)', '🧹') || '🧹';
-  let doc;
-  if(isPool){
-    const value = parseFloat(prompt('Dollar amount?', '1')) || 0;
-    doc = { title, icon, type:'pool', value, status:'open', assignedTo:null, claimedBy:null };
-  } else {
-    const kids = state.family.filter(m=>m.role==='child');
-    const names = kids.map((k,i)=>`${i+1}. ${k.name}`).join('\n');
-    const pick = parseInt(prompt(`Assign to who?\n${names}`,'1'))-1;
-    const assignedTo = kids[pick] ? kids[pick].id : null;
-    doc = { title, icon, type:'assigned', assignedTo, status:'open' };
-  }
-  if(firebaseReady){ db.collection('chores').add(doc); }
-  else { state.chores.push({id:'local'+Date.now(), ...doc}); renderAll(); }
+document.getElementById('saveWorkEmailBtn').addEventListener('click', ()=>{
+  const data = Object.assign({}, state.settings, { workEmailTo: document.getElementById('workEmailInput').value.trim() });
+  state.settings = data;
+  if(firebaseReady) dbWrite(db.collection('settings').doc('main').set(data, {merge:true}));
+  renderAll();
 });
 
 /* ============================== Tabs ============================== */
@@ -849,6 +1079,7 @@ document.querySelectorAll('nav.tabs button').forEach(btn=>{
 /* ============================== Master render ============================== */
 function renderAll(){
   renderFamilyStrip();
+  renderReminders();
   renderRoutineColumns();
   renderChoreColumns();
   renderPool();
@@ -859,12 +1090,9 @@ function renderAll(){
 renderAll();
 </script>
 
-<!-- EmailJS SDK — only needed if you fill in emailjsConfig above -->
 <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script>
-  if(emailjsConfig.publicKey && typeof emailjs !== 'undefined'){
-    emailjs.init({ publicKey: emailjsConfig.publicKey });
-  }
+  if(emailjsConfig.publicKey && typeof emailjs !== 'undefined'){ emailjs.init({ publicKey: emailjsConfig.publicKey }); }
 </script>
 </body>
 </html>
