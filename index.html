@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Our Week</title>
+<!-- Runs chromeless (no Safari address bar) when launched from a Home Screen icon added
+     after this was deployed — see the auto-update check below the SELF-UPDATE comment,
+     since a chromeless tile has no reload button of its own. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Our Week">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap" rel="stylesheet">
 
@@ -1110,6 +1117,42 @@ function renderAll(){
   if(!document.getElementById('tab-calendar').classList.contains('hidden')) renderCalendar();
 }
 renderAll();
+
+/* ============================== SELF-UPDATE CHECK ==============================
+   Home Screen tiles (especially chromeless ones — see apple-mobile-web-app-capable
+   above) have no reload button and can stay on a stale in-memory copy of this page
+   indefinitely. This periodically re-fetches this same file with caching disabled,
+   compares it to what's currently running, and reloads only if they differ and no
+   modal is open (so an in-progress add/edit form is never interrupted). */
+(function(){
+  let baselineHash = null;
+  let checking = false;
+  function hashText(text){
+    let h = 0;
+    for(let i=0;i<text.length;i++){ h = (h*31 + text.charCodeAt(i)) | 0; }
+    return h + ':' + text.length;
+  }
+  async function checkForUpdate(){
+    if(checking) return;
+    checking = true;
+    try{
+      const res = await fetch(location.pathname + '?_=' + Date.now(), { cache: 'no-store' });
+      if(res.ok){
+        const hash = hashText(await res.text());
+        if(baselineHash === null){
+          baselineHash = hash;
+        } else if(hash !== baselineHash){
+          const modalOpen = document.getElementById('modalRoot').innerHTML.trim() !== '';
+          if(!modalOpen) location.reload();
+          // else leave baselineHash alone — the mismatch is picked up again next interval
+        }
+      }
+    }catch(e){ /* offline or blocked — just try again next interval */ }
+    checking = false;
+  }
+  checkForUpdate();
+  setInterval(checkForUpdate, 30*60*1000);
+})();
 </script>
 
 <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
