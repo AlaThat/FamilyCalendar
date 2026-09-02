@@ -42,17 +42,21 @@ Since the repo is public, anyone can *see the code* — but per step 2, they can
 
 1. Open the app's URL in Safari on the iPad, sign in with one of the two logins.
 2. Share → **Add to Home Screen**.
-3. Open from the home screen icon (it'll stay signed in). It opens with no Safari address bar
-   or reload button — that's intentional (see below).
+3. Open from the home screen icon (it'll stay signed in). It opens as a normal Safari tab,
+   address bar and all — that's intentional, see the note below.
 4. Settings → Accessibility → Guided Access → turn on, set a passcode → triple-click the side button to lock the iPad into the app.
 5. Settings → Display & Brightness → Auto-Lock → **Never**, keep it plugged in.
 
 **Home Screen tiles don't need to be manually refreshed.** The app checks for its own updates
 every 30 minutes and reloads itself automatically once no form is open, so a tile left running
-for days will still pick up changes on its own. If you ever need to force it sooner (or the
-app itself changes in a way that alters this check), the only way to refresh a Home Screen
-tile with no address bar is to delete it and repeat steps 1–3 above — there's no reload button
-to tap. If you add the app to your phone too, the same applies there.
+for days will still pick up changes on its own without you doing anything. Safari's own reload
+button is also still right there as a manual fallback if you ever want it sooner.
+
+**Why this isn't a chromeless/"app-like" tile:** an earlier version removed Safari's address bar
+(via `apple-mobile-web-app-capable`), which briefly broke the on-screen keyboard on the sign-in
+screen — a real, long-standing WebKit bug in standalone home-screen web apps on iOS (documented
+across iOS 15 through at least 18), not something specific to this app's code. Reverted, and
+should stay reverted unless Apple has actually fixed the underlying bug — see CLAUDE.md.
 
 ## 5. (Optional) Work calendar blocking via email + Power Automate
 
@@ -87,7 +91,7 @@ Trigger on subject `[FAMILYBLOCK-REMOVE]` → **Get calendar view of events (V3)
 - **Real recurrence options** — daily, weekly, every 2 weeks, monthly (same date), monthly (same weekday — "1st Tuesday"), yearly — not just yearly
 - Full edit/delete on calendar events, multi-day events, all-day events with no one assigned, changing an event's date without deleting and re-adding it
 - Reminders on Today, routines split Morning/Evening/Anytime, configurable pay period, sign-in gate, no personal data in the public source
-- Runs as a chromeless Home Screen app (no Safari address bar) with its own automatic update check — see "Set up the iPad as a wall display" above
+- Home Screen tiles check for their own updates automatically every 30 minutes and reload themselves once no form is open — see "Set up the iPad as a wall display" above
 
 ## Deliberately not built yet — flagging the tradeoff, not silently skipping
 
