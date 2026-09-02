@@ -88,7 +88,11 @@ thing you can do first — it will likely surface real bugs that were never actu
 - `events`: `{title, date, endDate, allDay, startTime, endTime, recurrence:
   'none'|'daily'|'weekly'|'biweekly'|'monthly-date'|'monthly-weekday'|'yearly', assignees:
   [memberId] (empty or all-members = "applies to everyone", shown in a distinct dark color),
-  workBlock, tag}` — `tag` is used to correlate with the Outlook block via Power Automate
+  notes, birthYear, workBlock, tag}` — `tag` is used to correlate with the Outlook block via
+  Power Automate. `notes` is free text (location, details) shown in the day list and Day view.
+  `birthYear` only applies when `recurrence==='yearly'`; when set, the display title gets a
+  computed `(turning N)` suffix (`N` = the displayed occurrence's year minus `birthYear`) —
+  never stored on the title itself, so it stays correct every year with no upkeep.
 - `reminders`: `{text, done}`
 - `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly',
   workEmailTo}`
@@ -103,8 +107,10 @@ requiring distinctive, non-templated choices. Warm cream/paper background (`#F6F
 text (`#2C2A24`), Fraunces serif for headings/date numbers, system sans for everything else
 (no custom body webfont — performance on old iPad hardware). Family member colors are the only
 real accent colors in the UI; a fixed dark neutral (`--everyone: #3A362C`) marks events that
-apply to everyone. Bottom navigation (not top) — the on-screen headline is the current
-month/week, not app branding.
+apply to everyone. Bottom navigation (not top) — there is no top header/branding bar at all
+(removed deliberately to reclaim vertical space on the iPad); the on-screen headline is the
+current month/week/day. The "Sign out" control lives at the bottom of the Settings tab instead
+of a header, since there's nowhere else on-screen it belongs.
 
 ## User context (for tone/scope calibration, not for hardcoding into the app)
 

@@ -29,10 +29,6 @@
     -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
   #app{ display:flex; flex-direction:column; height:100vh; }
 
-  header.topbar{ display:flex; align-items:center; justify-content:space-between; padding: 10px 20px; border-bottom: 1px solid var(--paper-line); flex-shrink:0; }
-  header.topbar .brand{ font-family:"Fraunces", Georgia, serif; font-weight:600; font-size: 15px; letter-spacing:0.02em; color:var(--ink-soft); }
-  .signout-link{ font-size:13px; color:var(--ink-soft); text-decoration:underline; cursor:pointer; background:none; border:none; font-family:inherit; }
-
   /* Bottom nav */
   nav.tabs{ display:flex; gap:2px; justify-content:space-around; padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--paper-line); flex-shrink:0; background:var(--paper); position:sticky; bottom:0; z-index:40; }
@@ -103,6 +99,12 @@
   .week-col-head .cal-date-num{ display:block; font-size:18px; color:var(--ink); }
   .week-evt{ font-size:11px; color:white; padding:4px 6px; border-radius:6px; margin-bottom:4px; line-height:1.3; }
 
+  .day-view{ display:flex; flex-direction:column; gap:10px; }
+  .day-evt{ background:var(--white); border:1px solid var(--paper-line); border-left:6px solid var(--ink-soft); border-radius:8px; padding:12px 14px; cursor:pointer; }
+  .day-evt-time{ font-size:12px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.03em; margin-bottom:4px; }
+  .day-evt-title{ font-size:17px; font-weight:600; }
+  .day-evt-notes{ font-size:13px; color:var(--ink-soft); margin-top:4px; }
+
   .modal-backdrop{ position:fixed; inset:0; background:rgba(44,42,36,0.45); display:flex; align-items:center; justify-content:center; z-index:50; padding:20px; }
   .modal{ background: var(--white); border-radius: 14px; padding:22px; width:100%; max-width:460px; max-height:88vh; overflow-y:auto; }
   .modal h3{ font-family:"Fraunces",serif; margin-top:0; }
@@ -159,11 +161,6 @@
 </div>
 
 <div id="app" class="hidden">
-  <header class="topbar">
-    <div class="brand">Our Week</div>
-    <button class="signout-link" id="signOutBtn">Sign out</button>
-  </header>
-
   <main>
     <div id="configWarning" class="config-warning hidden">
       This app isn't connected to a database yet. Open <code>index.html</code> and fill in the
@@ -178,6 +175,7 @@
         <div class="view-toggle">
           <button class="vt-btn active" data-view="month">Month</button>
           <button class="vt-btn" data-view="week">Week</button>
+          <button class="vt-btn" data-view="day">Day</button>
         </div>
         <button class="cal-add-btn" id="calAddBtn">+ Add event</button>
       </div>
@@ -235,6 +233,10 @@
         <p class="section-sub">The inbox that receives the trigger email when you check "Add to work calendar" on an event. Set this up in Power Automate too — see SETUP.md.</p>
         <div class="field"><label>Send trigger emails to</label><input type="email" id="workEmailInput" placeholder="you@yourcompany.com"></div>
         <button class="btn btn-primary" id="saveWorkEmailBtn">Save</button>
+      </div>
+      <div class="settings-block">
+        <div class="section-title">Account</div>
+        <button class="btn btn-secondary" id="signOutBtn">Sign out</button>
       </div>
     </section>
   </main>
@@ -394,7 +396,14 @@ function eventOccursOnDate(evt, dateISO){
   return false;
 }
 function eventsOnDate(dateISO){ return state.events.filter(e => eventOccursOnDate(e, dateISO)); }
-function nowTimeHHMM(){ const d = new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function defaultEventTime(){ const d = new Date(); return String(d.getHours()).padStart(2,'0')+':00'; }
+function displayEventTitle(e, dateISO){
+  if(e.recurrence==='yearly' && e.birthYear){
+    const age = parseInt(dateISO.slice(0,4),10) - e.birthYear;
+    if(age>=0) return `${e.title} (turning ${age})`;
+  }
+  return e.title;
+}
 function isEveryoneEvent(e){
   const n = (e.assignees||[]).length;
   return n===0 || (state.family.length>0 && n>=state.family.length);
@@ -612,23 +621,28 @@ function renderEarnings(){
 let calViewMode = 'month';
 let calCursor = new Date(); calCursor.setDate(1);
 let weekCursor = new Date();
+let dayCursor = new Date();
 function startOfWeek(d){ const nd=new Date(d); nd.setHours(0,0,0,0); nd.setDate(nd.getDate()-nd.getDay()); return nd; }
 
 function renderCalendar(){
   renderCalendarHeader();
   renderPersonFilter();
-  if(calViewMode==='month') renderMonthGrid(); else renderWeekGrid();
+  if(calViewMode==='month') renderMonthGrid();
+  else if(calViewMode==='week') renderWeekGrid();
+  else renderDayGrid();
 }
 function renderCalendarHeader(){
   const label = document.getElementById('calMonthLabel');
   if(calViewMode==='month'){
     label.textContent = calCursor.toLocaleDateString(undefined,{month:'long', year:'numeric'});
-  } else {
+  } else if(calViewMode==='week'){
     const start = startOfWeek(weekCursor);
     const end = new Date(start); end.setDate(end.getDate()+6);
     label.textContent = start.getMonth()===end.getMonth()
       ? `${start.toLocaleDateString(undefined,{month:'long'})} ${start.getDate()}–${end.getDate()}, ${end.getFullYear()}`
       : `${start.toLocaleDateString(undefined,{month:'short',day:'numeric'})} – ${end.toLocaleDateString(undefined,{month:'short',day:'numeric'})}, ${end.getFullYear()}`;
+  } else {
+    label.textContent = dayCursor.toLocaleDateString(undefined,{weekday:'long', month:'long', day:'numeric', year:'numeric'});
   }
 }
 function renderPersonFilter(){
@@ -647,14 +661,20 @@ document.querySelectorAll('.vt-btn').forEach(b=> b.addEventListener('click', ()=
   renderCalendar();
 }));
 document.getElementById('calPrev').addEventListener('click', ()=>{
-  if(calViewMode==='month') calCursor.setMonth(calCursor.getMonth()-1); else weekCursor.setDate(weekCursor.getDate()-7);
+  if(calViewMode==='month') calCursor.setMonth(calCursor.getMonth()-1);
+  else if(calViewMode==='week') weekCursor.setDate(weekCursor.getDate()-7);
+  else dayCursor.setDate(dayCursor.getDate()-1);
   renderCalendar();
 });
 document.getElementById('calNext').addEventListener('click', ()=>{
-  if(calViewMode==='month') calCursor.setMonth(calCursor.getMonth()+1); else weekCursor.setDate(weekCursor.getDate()+7);
+  if(calViewMode==='month') calCursor.setMonth(calCursor.getMonth()+1);
+  else if(calViewMode==='week') weekCursor.setDate(weekCursor.getDate()+7);
+  else dayCursor.setDate(dayCursor.getDate()+1);
   renderCalendar();
 });
-document.getElementById('calAddBtn').addEventListener('click', ()=> openDayModal(todayISO()));
+document.getElementById('calAddBtn').addEventListener('click', ()=> openDayModal(calViewMode==='day' ? isoOf(dayCursor) : todayISO()));
+
+function findEventById(id){ return state.events.find(x=>x.id===id); }
 
 function renderMonthGrid(){
   const grid = document.getElementById('calGrid');
@@ -673,14 +693,18 @@ function renderMonthGrid(){
     const iso = isoOf(cellDate);
     const isToday = iso === todayISO();
     const dayEvents = eventsOnDateFiltered(iso);
-    const evtHtml = dayEvents.slice(0,3).map(e=> `<div class="cal-evt ${e.allDay?'allday':''}" style="background:${eventColor(e)}">${esc(e.title)}</div>`).join('');
+    const evtHtml = dayEvents.slice(0,3).map(e=> `<div class="cal-evt ${e.allDay?'allday':''}" data-event-id="${e.id}" style="background:${eventColor(e)}">${esc(displayEventTitle(e, iso))}</div>`).join('');
     cells += `<div class="cal-cell ${monthOffset!==0?'other-month':''} ${isToday?'today':''}" data-date="${iso}">
       <div class="cal-date-num">${dayNum}</div>${evtHtml}
       ${dayEvents.length>3?`<div style="font-size:11px;color:var(--ink-soft)">+${dayEvents.length-3} more</div>`:''}
     </div>`;
   }
   grid.innerHTML = cells;
-  grid.querySelectorAll('.cal-cell').forEach(cell=> cell.addEventListener('click', ()=> openDayModal(cell.dataset.date)));
+  grid.querySelectorAll('.cal-cell').forEach(cell=> cell.addEventListener('click', (ev)=>{
+    const pill = ev.target.closest('.cal-evt');
+    const evt = pill && findEventById(pill.dataset.eventId);
+    if(evt) openDayModal(cell.dataset.date, evt); else openDayModal(cell.dataset.date);
+  }));
 }
 function renderWeekGrid(){
   const grid = document.getElementById('calGrid');
@@ -694,11 +718,39 @@ function renderWeekGrid(){
     const dayEvents = eventsOnDateFiltered(iso);
     html += `<div class="week-col ${isToday?'today':''}" data-date="${iso}">
       <div class="week-col-head">${DOW[d.getDay()]}<span class="cal-date-num">${d.getDate()}</span></div>
-      ${dayEvents.length ? dayEvents.map(e=>`<div class="week-evt" style="background:${eventColor(e)}"><strong>${e.allDay?'All day':esc(e.startTime||'')}</strong> ${esc(e.title)}</div>`).join('') : ''}
+      ${dayEvents.length ? dayEvents.map(e=>`<div class="week-evt" data-event-id="${e.id}" style="background:${eventColor(e)}"><strong>${e.allDay?'All day':esc(e.startTime||'')}</strong> ${esc(displayEventTitle(e, iso))}</div>`).join('') : ''}
     </div>`;
   }
   grid.innerHTML = html;
-  grid.querySelectorAll('.week-col').forEach(col=> col.addEventListener('click', ()=> openDayModal(col.dataset.date)));
+  grid.querySelectorAll('.week-col').forEach(col=> col.addEventListener('click', (ev)=>{
+    const pill = ev.target.closest('.week-evt');
+    const evt = pill && findEventById(pill.dataset.eventId);
+    if(evt) openDayModal(col.dataset.date, evt); else openDayModal(col.dataset.date);
+  }));
+}
+function renderDayGrid(){
+  const grid = document.getElementById('calGrid');
+  grid.style.gridTemplateColumns = '1fr';
+  const iso = isoOf(dayCursor);
+  const dayEvents = eventsOnDateFiltered(iso).slice().sort((a,b)=>{
+    if(a.allDay && !b.allDay) return -1;
+    if(!a.allDay && b.allDay) return 1;
+    return (a.startTime||'').localeCompare(b.startTime||'');
+  });
+  grid.innerHTML = `<div class="day-view" data-date="${iso}">
+    ${dayEvents.length ? dayEvents.map(e=>`
+      <div class="day-evt" data-event-id="${e.id}" style="border-left-color:${eventColor(e)}">
+        <div class="day-evt-time">${e.allDay?'All day':esc(e.startTime||'')+(e.endTime?' – '+esc(e.endTime):'')}</div>
+        <div class="day-evt-title">${esc(displayEventTitle(e, iso))}</div>
+        ${e.notes?`<div class="day-evt-notes">📍 ${esc(e.notes)}</div>`:''}
+      </div>
+    `).join('') : '<div class="empty-note">Nothing scheduled.</div>'}
+  </div>`;
+  grid.querySelector('.day-view').addEventListener('click', (ev)=>{
+    const pill = ev.target.closest('.day-evt');
+    const evt = pill && findEventById(pill.dataset.eventId);
+    if(evt) openDayModal(iso, evt); else openDayModal(iso);
+  });
 }
 
 function iconPickerHtml(inputId, current){
@@ -737,13 +789,14 @@ function openDayModal(iso, editEvent){
           ${dayEvents.length ? dayEvents.map(e=>`
             <div class="list-row">
               <div class="dot" style="background:${eventColor(e)}"></div>
-              <div class="grow"><strong>${esc(e.title)}</strong><br>
+              <div class="grow"><strong>${esc(displayEventTitle(e, iso))}</strong><br>
                 <span style="font-size:13px;color:var(--ink-soft)">
                   ${e.allDay ? 'All day' : `${e.startTime||''}${e.endTime?' – '+e.endTime:''}`}
                   ${e.endDate && e.endDate!==e.date ? ' · through '+new Date(e.endDate+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}) : ''}
                   ${e.recurrence && e.recurrence!=='none' ? ' · '+recurrenceLabel(e.recurrence) : ''}
                   ${e.workBlock ? ' · blocks work calendar' : ''}
                 </span>
+                ${e.notes ? `<br><span style="font-size:12px;color:var(--ink-soft)">📍 ${esc(e.notes)}</span>` : ''}
               </div>
               <div class="evt-row-actions">
                 <button class="small-btn" data-edit="${e.id}">Edit</button>
@@ -760,8 +813,8 @@ function openDayModal(iso, editEvent){
         <div class="checkbox-row"><input type="checkbox" id="allDayCheck" ${isEdit&&editEvent.allDay?'checked':''}><label for="allDayCheck">All day</label></div>
 
         <div id="timeFields" class="${isEdit&&editEvent.allDay?'hidden':''}">
-          <div class="field"><label>Start time</label><input type="time" id="newEvtStart" value="${isEdit?(editEvent.startTime||''):nowTimeHHMM()}"></div>
-          <div class="field"><label>End time</label><input type="time" id="newEvtEnd" value="${isEdit?(editEvent.endTime||''):nowTimeHHMM()}"></div>
+          <div class="field"><label>Start time</label><input type="time" id="newEvtStart" value="${isEdit?(editEvent.startTime||''):defaultEventTime()}"></div>
+          <div class="field"><label>End time</label><input type="time" id="newEvtEnd" value="${isEdit?(editEvent.endTime||''):defaultEventTime()}"></div>
         </div>
 
         <div class="field"><label>Repeats</label>
@@ -778,6 +831,12 @@ function openDayModal(iso, editEvent){
 
         <div class="field" id="endDateField" style="${rec!=='none'?'display:none;':''}"><label>Lasts through (only if more than one day — e.g. a trip)</label>
           <input type="date" id="newEvtEndDate" value="${isEdit&&editEvent.endDate&&editEvent.endDate!==editEvent.date?editEvent.endDate:''}"></div>
+
+        <div class="field" id="birthYearField" style="${rec==='yearly'?'':'display:none;'}"><label>Birth year (optional — shows the age they're turning each year)</label>
+          <input type="number" id="newEvtBirthYear" min="1900" max="2100" placeholder="2019" value="${isEdit&&editEvent.birthYear?editEvent.birthYear:''}"></div>
+
+        <div class="field"><label>Notes (location, details, etc.)</label>
+          <textarea id="newEvtNotes" rows="2" placeholder="123 Main St, bring cleats">${isEdit?esc(editEvent.notes||''):''}</textarea></div>
 
         <div class="field">
           <label>Who (leave blank, or select everyone, for a reminder like a holiday)</label>
@@ -814,6 +873,7 @@ function openDayModal(iso, editEvent){
   });
   document.getElementById('newEvtRepeat').addEventListener('change', (e)=>{
     document.getElementById('endDateField').style.display = e.target.value==='none' ? '' : 'none';
+    document.getElementById('birthYearField').style.display = e.target.value==='yearly' ? '' : 'none';
   });
   const dateInput = document.getElementById('newEvtDate');
   const endDateInput = document.getElementById('newEvtEndDate');
@@ -851,8 +911,11 @@ function openDayModal(iso, editEvent){
     if(endDateVal && endDateVal < dateVal){
       showToast('The "lasts through" date can\'t be before the start date.'); return;
     }
+    const birthYearRaw = recurrence==='yearly' ? document.getElementById('newEvtBirthYear').value : '';
+    const birthYear = birthYearRaw ? parseInt(birthYearRaw, 10) : null;
+    const notes = document.getElementById('newEvtNotes').value.trim();
     const workBlock = document.getElementById('workBlockCheck').checked;
-    const data = { title, date: dateVal, endDate: endDateVal || dateVal, allDay, startTime, endTime, recurrence, assignees: Array.from(selected), workBlock };
+    const data = { title, date: dateVal, endDate: endDateVal || dateVal, allDay, startTime, endTime, recurrence, birthYear, notes, assignees: Array.from(selected), workBlock };
     if(isEdit) updateEvent(editEvent.id, data); else saveEvent(data);
     closeModal();
   });

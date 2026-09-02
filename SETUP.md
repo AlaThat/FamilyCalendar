@@ -42,9 +42,17 @@ Since the repo is public, anyone can *see the code* — but per step 2, they can
 
 1. Open the app's URL in Safari on the iPad, sign in with one of the two logins.
 2. Share → **Add to Home Screen**.
-3. Open from the home screen icon (it'll stay signed in).
+3. Open from the home screen icon (it'll stay signed in). It opens with no Safari address bar
+   or reload button — that's intentional (see below).
 4. Settings → Accessibility → Guided Access → turn on, set a passcode → triple-click the side button to lock the iPad into the app.
 5. Settings → Display & Brightness → Auto-Lock → **Never**, keep it plugged in.
+
+**Home Screen tiles don't need to be manually refreshed.** The app checks for its own updates
+every 30 minutes and reloads itself automatically once no form is open, so a tile left running
+for days will still pick up changes on its own. If you ever need to force it sooner (or the
+app itself changes in a way that alters this check), the only way to refresh a Home Screen
+tile with no address bar is to delete it and repeat steps 1–3 above — there's no reload button
+to tap. If you add the app to your phone too, the same applies there.
 
 ## 5. (Optional) Work calendar blocking via email + Power Automate
 
@@ -70,12 +78,16 @@ Trigger on subject `[FAMILYBLOCK-REMOVE]` → **Get calendar view of events (V3)
 
 ## What's built now
 
-- **Bottom navigation**, month/week name as the primary on-screen headline instead of app branding
-- **Month and Week views**, toggle at the top of Calendar
+- **Bottom navigation**, month/week/day name as the primary on-screen headline — there's no top header or app-branding bar at all, to keep the whole screen for the calendar
+- **Month, Week, and Day views**, toggle at the top of Calendar
+- **Tap any event directly** (in Month, Week, or Day view) to open its details/edit form immediately — no need to open the day first and then find it in a list. Tapping empty space on a day still opens that day's list and the add-event form, same as before.
+- **Notes field on events** — free text for a location or other details, shown in the day list and in Day view
+- **Birthday age tracking** — yearly-recurring events (birthdays, etc.) can have a birth year; the calendar then shows "(turning N)" next to the title, computed fresh from the event's actual date each time, so it's correct every year with no yearly upkeep
 - **Person filter** — tap a family member's name to see just their items; events assigned to everyone (or left unassigned, like a holiday) show in a distinct dark color and always appear regardless of filter
 - **Real recurrence options** — daily, weekly, every 2 weeks, monthly (same date), monthly (same weekday — "1st Tuesday"), yearly — not just yearly
-- Full edit/delete on calendar events, multi-day events, all-day events with no one assigned
+- Full edit/delete on calendar events, multi-day events, all-day events with no one assigned, changing an event's date without deleting and re-adding it
 - Reminders on Today, routines split Morning/Evening/Anytime, configurable pay period, sign-in gate, no personal data in the public source
+- Runs as a chromeless Home Screen app (no Safari address bar) with its own automatic update check — see "Set up the iPad as a wall display" above
 
 ## Deliberately not built yet — flagging the tradeoff, not silently skipping
 
