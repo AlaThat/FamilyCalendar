@@ -407,7 +407,135 @@ function eventOccursOnDate(evt, dateISO){
   if(rec === 'yearly'){ return d.getMonth() === startD.getMonth() && d.getDate() === startD.getDate(); }
   return false;
 }
-function eventsOnDate(dateISO){ return state.events.filter(e => eventOccursOnDate(e, dateISO)); }
+/* ============================== COMPUTED CALENDAR CONTENT ==============================
+   US federal holidays, seasons, and Daylight Saving changes are computed on the fly from
+   pure date math — never stored in Firestore, so they need no yearly upkeep and work for
+   any year. They're merged into eventsOnDate() as read-only "everyone" all-day entries
+   (holiday:true) that can't be edited or deleted — see findEventById/click handlers, which
+   only look them up in state.events and so treat a tap on one as tapping empty day space. */
+function localIsoOf(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function nthWeekdayOfMonth(year, month, weekday, n){
+  const first = new Date(year, month, 1);
+  const day = 1 + ((weekday - first.getDay() + 7) % 7) + (n-1)*7;
+  return new Date(year, month, day);
+}
+function lastWeekdayOfMonth(year, month, weekday){
+  const last = new Date(year, month+1, 0);
+  const day = last.getDate() - ((last.getDay() - weekday + 7) % 7);
+  return new Date(year, month, day);
+}
+function usFederalHolidaysForYear(year){
+  return [
+    [new Date(year,0,1), "New Year's Day"],
+    [nthWeekdayOfMonth(year,0,1,3), "Martin Luther King Jr. Day"],
+    [nthWeekdayOfMonth(year,1,1,3), "Presidents Day"],
+    [lastWeekdayOfMonth(year,4,1), "Memorial Day"],
+    [new Date(year,5,19), "Juneteenth"],
+    [new Date(year,6,4), "Independence Day"],
+    [nthWeekdayOfMonth(year,8,1,1), "Labor Day"],
+    [nthWeekdayOfMonth(year,9,1,2), "Columbus Day"],
+    [new Date(year,10,11), "Veterans Day"],
+    [nthWeekdayOfMonth(year,10,4,4), "Thanksgiving"],
+    [new Date(year,11,25), "Christmas Day"],
+  ].map(([d,title])=> ({ date: isoOf(d), title }));
+}
+function usDstChangesForYear(year){
+  return [
+    [nthWeekdayOfMonth(year,2,0,2), "Daylight Saving Time Begins"],
+    [nthWeekdayOfMonth(year,10,0,1), "Daylight Saving Time Ends"],
+  ].map(([d,title])=> ({ date: isoOf(d), title }));
+}
+/* Equinox/solstice instants via Jean Meeus's low-precision algorithm (Astronomical
+   Algorithms, 2nd ed., ch. 27, table 27.B + the 24-term periodic correction), valid for
+   years 1000-3000. Delta T (TT-UT) is approximated as a small constant since it only
+   matters here to the nearest minute, not for picking the correct calendar day. Checked
+   against published 2026 reference times (timeanddate.com-class sources) before use —
+   matched to the minute on all four. */
+function equinoxSolsticeUTC(year, season){
+  const TABLE_27B = {
+    0: [2451623.80984, 365242.37404, 0.05169, -0.00411, -0.00057],
+    1: [2451716.56767, 365241.62603, 0.00325, 0.00888, -0.00030],
+    2: [2451810.21715, 365242.01767, -0.11575, 0.00337, 0.00078],
+    3: [2451900.05952, 365242.74049, -0.06223, -0.00823, 0.00032],
+  };
+  const [c0,c1,c2,c3,c4] = TABLE_27B[season];
+  const y = (year - 2000) / 1000;
+  const jde0 = c0 + c1*y + c2*y*y + c3*y*y*y + c4*y*y*y*y;
+  const T = (jde0 - 2451545.0) / 36525;
+  const Wrad = (35999.373*T - 2.47) * Math.PI/180;
+  const deltaLambda = 1 + 0.0334*Math.cos(Wrad) + 0.0007*Math.cos(2*Wrad);
+  const PERIODIC_TERMS = [
+    [485,324.96,1934.136],[203,337.23,32964.467],[199,342.08,20.186],[182,27.85,445267.112],
+    [156,73.14,45036.886],[136,171.52,22518.443],[77,222.54,65928.934],[74,296.72,3034.906],
+    [70,243.58,9037.513],[58,119.81,33718.147],[52,297.17,150.678],[50,21.02,2281.226],
+    [45,247.54,29929.562],[44,325.15,31555.956],[29,60.93,4443.417],[18,155.12,67555.328],
+    [17,288.79,4562.452],[16,198.04,62894.029],[14,199.76,31436.921],[12,95.39,14577.848],
+    [12,287.11,31931.756],[12,320.81,34777.259],[9,227.73,1222.114],[8,15.45,16859.074],
+  ];
+  let S = 0;
+  for(const [A,B,C] of PERIODIC_TERMS) S += A * Math.cos((B + C*T) * Math.PI/180);
+  const jde = jde0 + (0.00001*S)/deltaLambda;
+  const DELTA_T_DAYS = 70/86400; // ~70s, era-appropriate constant
+  return julianDayToUTCDate(jde - DELTA_T_DAYS);
+}
+function julianDayToUTCDate(jd){
+  const jdn = jd + 0.5;
+  const Z = Math.floor(jdn);
+  const F = jdn - Z;
+  let A = Z;
+  if(Z >= 2299161){ const alpha = Math.floor((Z-1867216.25)/36524.25); A = Z + 1 + alpha - Math.floor(alpha/4); }
+  const B = A + 1524;
+  const C = Math.floor((B-122.1)/365.25);
+  const D = Math.floor(365.25*C);
+  const E = Math.floor((B-D)/30.6001);
+  const day = B - D - Math.floor(30.6001*E) + F;
+  const month = E<14 ? E-1 : E-13;
+  const year = month>2 ? C-4716 : C-4715;
+  const dayInt = Math.floor(day);
+  const hours = (day-dayInt)*24;
+  const h = Math.floor(hours);
+  const mins = Math.round((hours-h)*60);
+  return new Date(Date.UTC(year, month-1, dayInt, h, mins));
+}
+const SEASON_NAMES = ['First Day of Spring','First Day of Summer','First Day of Fall','First Day of Winter'];
+function seasonsForYear(year){
+  return [0,1,2,3].map(season => ({ date: localIsoOf(equinoxSolsticeUTC(year, season)), title: SEASON_NAMES[season] }));
+}
+function toReadOnlyCalendarEntry(date, title){
+  return { id:'computed_'+date+'_'+title.replace(/\s+/g,''), title, date, endDate:date, allDay:true,
+    startTime:'', endTime:'', recurrence:'none', assignees:[], notes:'', birthYear:null, workBlock:false, holiday:true };
+}
+function computedEventsOnDate(dateISO){
+  const year = parseInt(dateISO.slice(0,4), 10);
+  const all = usFederalHolidaysForYear(year).concat(usDstChangesForYear(year)).concat(seasonsForYear(year));
+  return all.filter(h => h.date === dateISO).map(h => toReadOnlyCalendarEntry(h.date, h.title));
+}
+const MOON_PHASE_TARGETS = [ [0,'🌑','New Moon'], [0.25,'🌓','First Quarter'], [0.5,'🌕','Full Moon'], [0.75,'🌗','Last Quarter'] ];
+function moonPhaseFraction(dateISO){
+  const SYNODIC_DAYS = 29.530588853;
+  const KNOWN_NEW_MOON_UTC = Date.UTC(2000,0,6,18,14,0);
+  const diffDays = (new Date(dateISO+'T12:00:00').getTime() - KNOWN_NEW_MOON_UTC) / 86400000;
+  let phase = (diffDays % SYNODIC_DAYS) / SYNODIC_DAYS;
+  if(phase < 0) phase += 1;
+  return phase;
+}
+function moonPhaseIconForDate(dateISO){
+  const dist = (frac, target) => { const d = Math.abs(frac-target); return Math.min(d, 1-d); };
+  const d = new Date(dateISO+'T00:00:00');
+  const prevFrac = moonPhaseFraction(isoOf(new Date(d.getTime()-86400000)));
+  const todayFrac = moonPhaseFraction(dateISO);
+  const nextFrac = moonPhaseFraction(isoOf(new Date(d.getTime()+86400000)));
+  for(const [target, icon, name] of MOON_PHASE_TARGETS){
+    const dToday = dist(todayFrac, target), dPrev = dist(prevFrac, target), dNext = dist(nextFrac, target);
+    if(dToday <= dPrev && dToday <= dNext) return { icon, name };
+  }
+  return null;
+}
+function moonBadge(dateISO){
+  const phase = moonPhaseIconForDate(dateISO);
+  return phase ? ` <span class="moon-badge" title="${esc(phase.name)}">${phase.icon}</span>` : '';
+}
+function eventsOnDate(dateISO){ return state.events.filter(e => eventOccursOnDate(e, dateISO)).concat(computedEventsOnDate(dateISO)); }
 function defaultEventTime(){ const d = new Date(); return String(d.getHours()).padStart(2,'0')+':00'; }
 function formatTime12(hhmm){
   if(!hhmm) return '';
@@ -745,7 +873,7 @@ function renderMonthGrid(){
     const dayEvents = eventsOnDateFiltered(iso);
     const evtHtml = dayEvents.slice(0,3).map(e=> `<div class="cal-evt ${e.allDay?'allday':''}" data-event-id="${e.id}" style="background:${eventColor(e)}">${!e.allDay&&e.startTime?`<strong>${esc(formatTime12(e.startTime))}</strong> `:''}${esc(displayEventTitle(e, iso))}</div>`).join('');
     cells += `<div class="cal-cell ${monthOffset!==0?'other-month':''} ${isToday?'today':''}" data-date="${iso}">
-      <div class="cal-date-num">${dayNum}</div>${evtHtml}
+      <div class="cal-date-num">${dayNum}${moonBadge(iso)}</div>${evtHtml}
       ${dayEvents.length>3?`<div style="font-size:11px;color:var(--ink-soft)">+${dayEvents.length-3} more</div>`:''}
     </div>`;
   }
@@ -768,7 +896,7 @@ function renderWeekGrid(){
     const isToday = iso===todayISO();
     const dayEvents = eventsOnDateFiltered(iso);
     html += `<div class="week-col ${isToday?'today':''}" data-date="${iso}">
-      <div class="week-col-head">${DOW[d.getDay()]}<span class="cal-date-num">${d.getDate()}</span></div>
+      <div class="week-col-head">${DOW[d.getDay()]}<span class="cal-date-num">${d.getDate()}${moonBadge(iso)}</span></div>
       ${dayEvents.length ? dayEvents.map(e=>`<div class="week-evt" data-event-id="${e.id}" style="background:${eventColor(e)}"><strong>${e.allDay?'All day':esc(formatTime12(e.startTime))}</strong> ${esc(displayEventTitle(e, iso))}</div>`).join('') : ''}
     </div>`;
   }
@@ -850,10 +978,10 @@ function openDayModal(iso, editEvent){
                 </span>
                 ${e.notes ? `<br><span style="font-size:12px;color:var(--ink-soft)">📍 ${esc(e.notes)}</span>` : ''}
               </div>
-              <div class="evt-row-actions">
+              ${e.holiday ? '' : `<div class="evt-row-actions">
                 <button class="small-btn" data-edit="${e.id}">Edit</button>
                 <button class="small-btn" data-del="${e.id}">Delete</button>
-              </div>
+              </div>`}
             </div>
           `).join('') : '<div class="empty-note">Nothing scheduled yet.</div>'}
         </div>

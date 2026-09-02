@@ -115,6 +115,21 @@ thing you can do first — it will likely surface real bugs that were never actu
 - `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly',
   workEmailTo}`
 
+**Computed calendar content — not stored anywhere.** US federal holidays (all 11, always
+shown — confirmed with the user, no Settings toggle), seasons (equinoxes/solstices, via Jean
+Meeus's low-precision algorithm — verified against published 2026 times to the minute before
+shipping), and US Daylight Saving Time changes (exact, per US law: 2nd Sunday in March / 1st
+Sunday in November) are computed fresh from date math in `computedEventsOnDate()` and merged
+into `eventsOnDate()` as read-only "everyone" all-day entries (`holiday:true`). They're never
+written to Firestore, need no yearly upkeep, and can't be edited or deleted — `findEventById`
+only searches real `state.events`, so tapping one just opens that day's list, same as tapping
+empty cell space. Moon phase icons (🌑🌓🌕🌗, only on the 4 exact phase days each cycle — not
+every day) are separate: computed per-date by `moonPhaseIconForDate()` and shown next to the
+date number in Month/Week views, not injected as calendar entries. If any of this is ever
+revisited, get explicit scope from the user first (which holiday set, on-by-default vs. a
+toggle, how moon phases should display) — guessing on exactly this cost a full round-trip
+once already (see the Home Screen chrome saga above).
+
 Recurrence + multi-day (`endDate`) are mutually exclusive in the current implementation —
 recurring events are treated as single-day only. This is a known simplification, not a bug.
 

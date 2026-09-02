@@ -94,6 +94,8 @@ Trigger on subject `[FAMILYBLOCK-REMOVE]` → **Get calendar view of events (V3)
 - **Start time shown on calendar pills** (Month/Week/Day) for anything that isn't an all-day event
 - **Recurring reminders** in Settings, in addition to the one-off reminders you can still add from the Today tab — pick which days they show up and they reset automatically each day, no re-adding
 - **Multi-person event color** — an event assigned to more than one person but not everyone now shows as an even color-band split between just those people, instead of silently showing only the first person's color
+- **US federal holidays** (all 11), **seasons** (equinoxes/solstices), and **Daylight Saving Time changes** show up automatically every year — computed from date math, not stored anywhere, so there's nothing to maintain and no Firestore writes. No Settings toggle for these; they're always shown.
+- **Moon phase icons** (🌑🌓🌕🌗) next to the date number in Month and Week views, only on the four days each month a phase actually lands (new/first quarter/full/last quarter) — not on every day
 - Reminders on Today, routines split Morning/Evening/Anytime, configurable pay period, sign-in gate, no personal data in the public source
 - Home Screen tiles check for their own updates automatically every 30 minutes and reload themselves once no form is open — see "Set up the iPad as a wall display" above
 
