@@ -100,7 +100,7 @@
 
   .day-view{ display:flex; flex-direction:column; gap:10px; }
   .day-evt{ background:var(--white); border:1px solid var(--paper-line); border-left:6px solid var(--ink-soft); border-radius:8px; padding:12px 14px; cursor:pointer; }
-  .day-evt-time{ font-size:12px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.03em; margin-bottom:4px; }
+  .day-evt-time{ font-size:12px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.03em; margin-top:4px; }
   .day-evt-title{ font-size:17px; font-weight:600; }
   .day-evt-notes{ font-size:13px; color:var(--ink-soft); margin-top:4px; }
 
@@ -871,7 +871,7 @@ function renderMonthGrid(){
     const iso = isoOf(cellDate);
     const isToday = iso === todayISO();
     const dayEvents = eventsOnDateFiltered(iso);
-    const evtHtml = dayEvents.slice(0,3).map(e=> `<div class="cal-evt ${e.allDay?'allday':''}" data-event-id="${e.id}" style="background:${eventColor(e)}">${!e.allDay&&e.startTime?`<strong>${esc(formatTime12(e.startTime))}</strong> `:''}${esc(displayEventTitle(e, iso))}</div>`).join('');
+    const evtHtml = dayEvents.slice(0,3).map(e=> `<div class="cal-evt ${e.allDay?'allday':''}" data-event-id="${e.id}" style="background:${eventColor(e)}">${esc(displayEventTitle(e, iso))}${!e.allDay&&e.startTime?` <strong>${esc(formatTime12(e.startTime))}</strong>`:''}</div>`).join('');
     cells += `<div class="cal-cell ${monthOffset!==0?'other-month':''} ${isToday?'today':''}" data-date="${iso}">
       <div class="cal-date-num">${dayNum}${moonBadge(iso)}</div>${evtHtml}
       ${dayEvents.length>3?`<div style="font-size:11px;color:var(--ink-soft)">+${dayEvents.length-3} more</div>`:''}
@@ -897,7 +897,7 @@ function renderWeekGrid(){
     const dayEvents = eventsOnDateFiltered(iso);
     html += `<div class="week-col ${isToday?'today':''}" data-date="${iso}">
       <div class="week-col-head">${DOW[d.getDay()]}<span class="cal-date-num">${d.getDate()}${moonBadge(iso)}</span></div>
-      ${dayEvents.length ? dayEvents.map(e=>`<div class="week-evt" data-event-id="${e.id}" style="background:${eventColor(e)}"><strong>${e.allDay?'All day':esc(formatTime12(e.startTime))}</strong> ${esc(displayEventTitle(e, iso))}</div>`).join('') : ''}
+      ${dayEvents.length ? dayEvents.map(e=>`<div class="week-evt" data-event-id="${e.id}" style="background:${eventColor(e)}">${esc(displayEventTitle(e, iso))} <strong>${e.allDay?'All day':esc(formatTime12(e.startTime))}</strong></div>`).join('') : ''}
     </div>`;
   }
   grid.innerHTML = html;
@@ -920,8 +920,8 @@ function renderDayGrid(){
   grid.innerHTML = `<div class="day-view" data-date="${iso}">
     ${dayEvents.length ? dayEvents.map(e=>`
       <div class="day-evt" data-event-id="${e.id}" style="border-left-color:${eventBorderColor(e)}">
-        <div class="day-evt-time">${e.allDay?'All day':esc(formatTime12(e.startTime))+(e.endTime?' – '+esc(formatTime12(e.endTime)):'')}</div>
         <div class="day-evt-title">${esc(displayEventTitle(e, iso))}</div>
+        <div class="day-evt-time">${e.allDay?'All day':esc(formatTime12(e.startTime))+(e.endTime?' – '+esc(formatTime12(e.endTime)):'')}</div>
         ${e.notes?`<div class="day-evt-notes">📍 ${esc(e.notes)}</div>`:''}
       </div>
     `).join('') : '<div class="empty-note">Nothing scheduled.</div>'}
