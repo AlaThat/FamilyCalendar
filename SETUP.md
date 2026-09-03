@@ -96,6 +96,10 @@ Trigger on subject `[FAMILYBLOCK-REMOVE]` → **Get calendar view of events (V3)
 - **Multi-person event color** — an event assigned to more than one person but not everyone now shows as an even color-band split between just those people, instead of silently showing only the first person's color
 - **US federal holidays** (all 11), **seasons** (equinoxes/solstices), and **Daylight Saving Time changes** show up automatically every year — computed from date math, not stored anywhere, so there's nothing to maintain and no Firestore writes. No Settings toggle for these; they're always shown.
 - **Moon phase icons** (🌑🌓🌕🌗) next to the date number in Month and Week views, only on the four days each month a phase actually lands (new/first quarter/full/last quarter) — not on every day
+- **Events on a given day now show all-day events first, then the rest by start time** — and if more than one all-day event lands on the same day, ▲/▼ arrows in that day's list let you pick which shows first
+- **Manual reordering** — routines, chores, and recurring reminders each have ▲/▼ arrows in their Settings list to fix the order they show in without deleting and re-adding anything; one-off reminders on the Today tab have the same arrows directly on their rows
+- **Routines can be assigned to parents too, not just kids** — a parent with at least one routine shows up on the Today tab with their own card, just like a kid
+- **Each person on a routine can have their own days** (Sun–Sat checkboxes, default all checked) — e.g. one kid's bath nights can be Sun/Wed/Fri while another's are Mon/Thu/Sat, all on the same "Evening Bath" routine, no need to create separate routines per person
 - Reminders on Today, routines split Morning/Evening/Anytime, configurable pay period, sign-in gate, no personal data in the public source
 - Home Screen tiles check for their own updates automatically every 30 minutes and reload themselves once no form is open — see "Set up the iPad as a wall display" above
 
