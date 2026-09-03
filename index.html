@@ -90,17 +90,29 @@
   .cal-evt{ font-size:11px; padding:2px 5px; border-radius:5px; color:white; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cal-evt.allday{ border:1px dashed rgba(255,255,255,0.7); }
 
-  .week-col{ background:var(--white); border:1px solid var(--paper-line); border-radius:8px; padding:8px; min-height:220px; height:100%; min-width:0; overflow-x:hidden; overflow-y:auto; cursor:pointer; }
-  .week-col.today{ border-color:var(--accent); border-width:2px; }
-  .week-col-head{ font-weight:700; font-size:12px; text-align:center; margin-bottom:8px; color:var(--ink-soft); }
-  .week-col-head .cal-date-num{ display:block; font-size:18px; color:var(--ink); }
-  .week-evt{ font-size:11px; color:white; padding:4px 6px; border-radius:6px; margin-bottom:4px; line-height:1.3; }
-
-  .day-view{ display:flex; flex-direction:column; gap:10px; }
-  .day-evt{ background:var(--white); border:1px solid var(--paper-line); border-left:6px solid var(--ink-soft); border-radius:8px; padding:12px 14px; cursor:pointer; }
-  .day-evt-time{ font-size:12px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.03em; margin-top:4px; }
-  .day-evt-title{ font-size:17px; font-weight:600; }
-  .day-evt-notes{ font-size:13px; color:var(--ink-soft); margin-top:4px; }
+  /* Outlook-style time grid, shared by Week (7 columns) and Day (1 column) views — see
+     renderTimeGrid(). All-day events pin to a row on top; timed events are absolutely
+     positioned within a shared scrollable hour grid so their vertical position reflects when
+     they actually land in the day, with overlapping events packed side by side. */
+  .time-grid-wrap{ display:flex; flex-direction:column; flex:1; min-height:0; }
+  .allday-row{ display:flex; border-bottom:1px solid var(--paper-line); padding-bottom:4px; margin-bottom:2px; flex-shrink:0; }
+  .hour-axis-spacer{ width:52px; flex-shrink:0; }
+  .allday-col{ flex:1; min-width:0; padding:2px 4px; cursor:pointer; display:flex; flex-direction:column; gap:3px; border-left:1px solid var(--paper-line); }
+  .week-day-head{ font-weight:700; font-size:12px; text-align:center; color:var(--ink-soft); margin-bottom:2px; }
+  .week-day-head.today{ color:var(--accent); }
+  .week-day-head .cal-date-num{ display:block; font-size:16px; color:var(--ink); }
+  .allday-pill{ font-size:11px; padding:3px 6px; border-radius:5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
+  .time-grid-scroll{ flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; position:relative; }
+  .time-grid-inner{ display:flex; position:relative; }
+  .hour-axis{ width:52px; flex-shrink:0; position:relative; }
+  .hour-label{ position:absolute; right:8px; transform:translateY(-50%); font-size:11px; color:var(--ink-soft); white-space:nowrap; }
+  .time-col{ flex:1; min-width:0; position:relative; border-left:1px solid var(--paper-line); cursor:pointer; }
+  .hour-line{ position:absolute; left:0; right:0; border-top:1px solid var(--paper-line); }
+  .time-evt{ position:absolute; border-radius:6px; padding:2px 6px; font-size:11px; line-height:1.25; overflow:hidden; cursor:pointer; box-shadow:0 1px 2px rgba(44,42,36,0.15); box-sizing:border-box; }
+  .time-evt-title{ font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .time-evt-time{ font-size:10px; opacity:0.9; }
+  .now-line{ position:absolute; left:0; right:0; height:2px; background:var(--accent); z-index:3; pointer-events:none; }
+  .now-line::before{ content:''; position:absolute; left:-4px; top:-3px; width:8px; height:8px; border-radius:50%; background:var(--accent); }
 
   .modal-backdrop{ position:fixed; inset:0; background:rgba(44,42,36,0.45); display:flex; align-items:center; justify-content:center; z-index:50; padding:20px; }
   .modal{ background: var(--white); border-radius: 14px; padding:22px; width:100%; max-width:460px; max-height:88vh; overflow-y:auto; }
@@ -688,7 +700,6 @@ function eventColor(e){
   const stops = colors.map((c,i)=> `${c} ${(i*step).toFixed(2)}%, ${c} ${((i+1)*step).toFixed(2)}%`).join(', ');
   return `linear-gradient(90deg, ${stops})`;
 }
-function eventBorderColor(e){ return isEveryoneEvent(e) ? 'var(--everyone)' : colorOf((e.assignees||[])[0]); }
 function eventTextColor(e){ return isEveryoneEvent(e) ? 'var(--everyone-text)' : textColorOf((e.assignees||[])[0]); }
 let calPersonFilter = null;
 function passesPersonFilter(e){ if(!calPersonFilter) return true; return isEveryoneEvent(e) || (e.assignees||[]).includes(calPersonFilter); }
@@ -1080,47 +1091,124 @@ function renderMonthGrid(){
     openEventForEdit(pill && pill.dataset.eventId, cell.dataset.date);
   }));
 }
-function renderWeekGrid(){
-  const grid = document.getElementById('calGrid');
-  grid.style.gridTemplateColumns = 'repeat(7, minmax(0,1fr))';
-  grid.style.gridTemplateRows = '1fr';
-  const start = startOfWeek(weekCursor);
-  let html = '';
-  for(let i=0;i<7;i++){
-    const d = new Date(start); d.setDate(d.getDate()+i);
-    const iso = isoOf(d);
-    const isToday = iso===todayISO();
-    const dayEvents = eventsOnDateFiltered(iso);
-    html += `<div class="week-col ${isToday?'today':''}" data-date="${iso}">
-      <div class="week-col-head">${DOW[d.getDay()]}<span class="cal-date-num">${d.getDate()}${moonBadge(iso)}</span></div>
-      ${dayEvents.length ? dayEvents.map(e=>`<div class="week-evt" data-event-id="${e.id}" style="background:${eventColor(e)};color:${eventTextColor(e)}">${esc(displayEventTitle(e, iso))} <strong>${e.allDay?'All day':esc(formatTime12(e.startTime))}</strong></div>`).join('') : ''}
-    </div>`;
-  }
-  grid.innerHTML = html;
-  grid.querySelectorAll('.week-col').forEach(col=> col.addEventListener('click', (ev)=>{
-    const pill = ev.target.closest('.week-evt');
-    openEventForEdit(pill && pill.dataset.eventId, col.dataset.date);
-  }));
+const TIME_GRID_HOUR_HEIGHT = 48; // px per hour in the Week/Day time grid (24h tall = 1152px, scrolls)
+function timeToMinutes(hhmm){ if(!hhmm) return 0; const [h,m] = hhmm.split(':').map(Number); return h*60+(m||0); }
+function hourLabel12(h){ const period = h>=12?'PM':'AM'; let hh=h%12; if(hh===0) hh=12; return `${hh} ${period}`; }
+function timedEventGeometry(e){
+  const MIN_DURATION = 30; // minutes — a floor on visual height only, never touches stored data
+  const startMin = timeToMinutes(e.startTime);
+  let endMin = timeToMinutes(e.endTime);
+  if(!e.endTime || endMin <= startMin) endMin = startMin + 60;
+  if(endMin - startMin < MIN_DURATION) endMin = startMin + MIN_DURATION;
+  return { startMin, endMin: Math.min(endMin, 24*60) };
 }
-function renderDayGrid(){
+/* Side-by-side layout for overlapping timed events (a standard interval-packing sweep): walk
+   events by start time, reuse a column once its previous occupant has ended, open a new column
+   otherwise. Events are grouped into clusters (runs of mutually-touching events) so unrelated
+   events later in the day aren't forced to share the same column width. */
+function packTimedEvents(evts){
+  const sorted = evts.slice().sort((a,b)=> a.startMin-b.startMin || a.endMin-b.endMin);
+  let clusterEvents = [], clusterEnd = -Infinity, columnEnds = [];
+  const flush = ()=>{ clusterEvents.forEach(e=> e.totalCols = columnEnds.length); clusterEvents = []; columnEnds = []; };
+  sorted.forEach(e=>{
+    if(e.startMin >= clusterEnd){ flush(); clusterEnd = -Infinity; }
+    let col = columnEnds.findIndex(end => end <= e.startMin);
+    if(col === -1){ col = columnEnds.length; columnEnds.push(e.endMin); } else columnEnds[col] = e.endMin;
+    e.col = col;
+    clusterEnd = Math.max(clusterEnd, e.endMin);
+    clusterEvents.push(e);
+  });
+  flush();
+  return sorted;
+}
+function timeEvtHtml(e, iso){
+  const top = (e.startMin/60) * TIME_GRID_HOUR_HEIGHT;
+  const height = ((e.endMin-e.startMin)/60) * TIME_GRID_HOUR_HEIGHT;
+  const widthPct = 100/e.totalCols;
+  const leftPct = e.col * widthPct;
+  return `<div class="time-evt" data-event-id="${e.id}" style="top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${widthPct}% - 2px);background:${eventColor(e)};color:${eventTextColor(e)}">
+    <div class="time-evt-title">${esc(displayEventTitle(e, iso))}</div>
+    <div class="time-evt-time">${esc(formatTime12(e.startTime))}${e.endTime?'–'+esc(formatTime12(e.endTime)):''}</div>
+  </div>`;
+}
+function alldayPillHtml(e, iso){
+  return `<div class="allday-pill" data-event-id="${e.id}" style="background:${eventColor(e)};color:${eventTextColor(e)}">${esc(displayEventTitle(e, iso))}</div>`;
+}
+function hourAxisHtml(){
+  let html = '';
+  for(let h=0; h<24; h++) html += `<div class="hour-label" style="top:${h*TIME_GRID_HOUR_HEIGHT}px">${hourLabel12(h)}</div>`;
+  return html;
+}
+function hourLinesHtml(){
+  let html = '';
+  for(let h=0; h<24; h++) html += `<div class="hour-line" style="top:${h*TIME_GRID_HOUR_HEIGHT}px"></div>`;
+  return html;
+}
+function nowLineHtml(){
+  const now = new Date();
+  const top = (now.getHours()*60+now.getMinutes())/60*TIME_GRID_HOUR_HEIGHT;
+  return `<div class="now-line" style="top:${top}px"></div>`;
+}
+/* Shared Outlook-style time grid for both Week (7 dates) and Day (1 date) views: an all-day
+   row pinned on top, then a shared scrollable hour grid where timed events are positioned by
+   actual start/end time (see timedEventGeometry/packTimedEvents) instead of just listed in
+   order. Month view is unaffected — it stays the compact multi-week grid it always was. */
+function renderTimeGrid(dates){
   const grid = document.getElementById('calGrid');
   grid.style.gridTemplateColumns = '1fr';
-  grid.style.gridTemplateRows = 'auto';
-  const iso = isoOf(dayCursor);
-  const dayEvents = eventsOnDateFiltered(iso); // already sorted: computed all-day, real all-day, then timed
-  grid.innerHTML = `<div class="day-view" data-date="${iso}">
-    ${dayEvents.length ? dayEvents.map(e=>`
-      <div class="day-evt" data-event-id="${e.id}" style="border-left-color:${eventBorderColor(e)}">
-        <div class="day-evt-title">${esc(displayEventTitle(e, iso))}</div>
-        <div class="day-evt-time">${e.allDay?'All day':esc(formatTime12(e.startTime))+(e.endTime?' – '+esc(formatTime12(e.endTime)):'')}</div>
-        ${e.notes?`<div class="day-evt-notes">📍 ${esc(e.notes)}</div>`:''}
-      </div>
-    `).join('') : '<div class="empty-note">Nothing scheduled.</div>'}
+  grid.style.gridTemplateRows = '1fr';
+  const showHeaders = dates.length > 1;
+  const today = todayISO();
+
+  const alldayColsHtml = dates.map(iso=>{
+    const d = new Date(iso+'T00:00:00');
+    const alldayEvts = eventsOnDateFiltered(iso).filter(e=>e.allDay);
+    return `<div class="allday-col" data-date="${iso}">
+      ${showHeaders ? `<div class="week-day-head ${iso===today?'today':''}">${DOW[d.getDay()]}<span class="cal-date-num">${d.getDate()}${moonBadge(iso)}</span></div>` : ''}
+      ${alldayEvts.map(e=>alldayPillHtml(e, iso)).join('')}
+    </div>`;
+  }).join('');
+
+  const timeColsHtml = dates.map(iso=>{
+    const timedEvts = eventsOnDateFiltered(iso).filter(e=>!e.allDay).map(e=> Object.assign({}, e, timedEventGeometry(e)));
+    const packed = packTimedEvents(timedEvts);
+    return `<div class="time-col ${iso===today?'today':''}" data-date="${iso}">
+      ${hourLinesHtml()}
+      ${packed.map(e=>timeEvtHtml(e, iso)).join('')}
+      ${iso===today ? nowLineHtml() : ''}
+    </div>`;
+  }).join('');
+
+  grid.innerHTML = `<div class="time-grid-wrap">
+    <div class="allday-row"><div class="hour-axis-spacer"></div>${alldayColsHtml}</div>
+    <div class="time-grid-scroll"><div class="time-grid-inner" style="height:${24*TIME_GRID_HOUR_HEIGHT}px">
+      <div class="hour-axis">${hourAxisHtml()}</div>
+      ${timeColsHtml}
+    </div></div>
   </div>`;
-  grid.querySelector('.day-view').addEventListener('click', (ev)=>{
-    const pill = ev.target.closest('.day-evt');
-    openEventForEdit(pill && pill.dataset.eventId, iso);
-  });
+
+  grid.querySelectorAll('.allday-col').forEach(col=> col.addEventListener('click', (ev)=>{
+    const pill = ev.target.closest('.allday-pill');
+    openEventForEdit(pill && pill.dataset.eventId, col.dataset.date);
+  }));
+  grid.querySelectorAll('.time-col').forEach(col=> col.addEventListener('click', (ev)=>{
+    const pill = ev.target.closest('.time-evt');
+    openEventForEdit(pill && pill.dataset.eventId, col.dataset.date);
+  }));
+
+  const scrollEl = grid.querySelector('.time-grid-scroll');
+  const now = new Date();
+  const scrollToHour = dates.includes(today) ? Math.max(0, now.getHours()-2) : 7;
+  scrollEl.scrollTop = scrollToHour * TIME_GRID_HOUR_HEIGHT;
+}
+function renderWeekGrid(){
+  const start = startOfWeek(weekCursor);
+  const dates = [];
+  for(let i=0;i<7;i++){ const d = new Date(start); d.setDate(d.getDate()+i); dates.push(isoOf(d)); }
+  renderTimeGrid(dates);
+}
+function renderDayGrid(){
+  renderTimeGrid([isoOf(dayCursor)]);
 }
 
 function iconPickerHtml(inputId, current){

@@ -145,8 +145,10 @@ thing you can do first — it will likely surface real bugs that were never actu
   [memberId] (empty or all-members = "applies to everyone", shown in a distinct dark color; 2+
   members but not everyone shows as an equal-width multi-color gradient split, one band per
   assignee), notes, birthYear, workBlock, tag, order}` — `tag` is used to correlate with the
-  Outlook block via Power Automate. `notes` is free text (location, details) shown in the day
-  list and Day view. `birthYear` only applies when `recurrence==='yearly'`; when set, the display
+  Outlook block via Power Automate. `notes` is free text (location, details) shown in the
+  day-list modal (tap a day, or tap an event) — not inline on the calendar pill itself in any of
+  Month/Week/Day, same as the title-only pills everywhere else. `birthYear` only applies when
+  `recurrence==='yearly'`; when set, the display
   title gets a computed `(turning N)` suffix (`N` = the displayed occurrence's year minus
   `birthYear`) — never stored on the title itself, so it stays correct every year with no upkeep.
   `order` (set to `Date.now()` at creation) is a tie-breaker among same-day all-day events only —
@@ -244,6 +246,21 @@ once already (see the Home Screen chrome saga above).
 
 Recurrence + multi-day (`endDate`) are mutually exclusive in the current implementation —
 recurring events are treated as single-day only. This is a known simplification, not a bug.
+
+**Week and Day views are an Outlook-style time grid, not a list.** `renderTimeGrid(dates)` is the
+single shared implementation behind both — `renderWeekGrid()` passes 7 dates, `renderDayGrid()`
+passes 1 — so Day view is really just a 1-column week. An all-day row is pinned above a shared
+scrollable hour grid (`TIME_GRID_HOUR_HEIGHT = 48`px/hour, 24h = 1152px tall); timed events are
+absolutely positioned by actual start/end time (`timedEventGeometry()`, with a 30-minute floor on
+*visual* height only — never touches the stored `startTime`/`endTime`) rather than just listed in
+order. Overlapping timed events are packed into side-by-side columns by `packTimedEvents()` — a
+standard interval-packing sweep (sort by start time, reuse a column once its previous occupant
+has ended, open a new one otherwise, grouped into clusters of mutually-touching events so an
+unrelated event later in the day isn't forced to share column width with an earlier cluster).
+Today's column gets a `.now-line` current-time indicator; the grid's default scroll position is
+"now minus 2 hours" if today is in view, else 7 AM, so opening the view doesn't dump you at
+midnight. Month view is untouched by any of this — it stays the compact multi-week grid it always
+was, matching how Outlook's own Month view also doesn't show a time grid.
 
 ## Design language (established, keep consistent)
 
