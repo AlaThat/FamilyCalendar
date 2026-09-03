@@ -90,7 +90,9 @@ Trigger on subject `[FAMILYBLOCK-REMOVE]` → **Get calendar view of events (V3)
 - **Person filter** — tap a family member's name to see just their items; events assigned to everyone (or left unassigned, like a holiday) show in a distinct dark color and always appear regardless of filter
 - **Real recurrence options** — daily, weekly, every 2 weeks, monthly (same date), monthly (same weekday — "1st Tuesday"), yearly — not just yearly
 - Full edit/delete on calendar events, multi-day events, all-day events with no one assigned, changing an event's date without deleting and re-adding it
-- **Shared assigned chores** — an unpaid chore can be assigned to more than one kid at once, the same tap-to-toggle picker as routines; either kid checking it off marks it done for both
+- **Shared assigned chores** — an unpaid chore can be assigned to more than one person at once, the same tap-to-toggle picker as routines; whoever checks it off marks it done for everyone sharing it
+- **Chores have the same per-person day scheduling as routines, plus a one-time option** — an assigned chore can either recur on different days for each person assigned (e.g. sweep Mon/Wed, vacuum Tue), or be scheduled for a single specific date and never repeat (e.g. "pick up all the stuffies tomorrow"). New chores default to "Assigned, no pay" instead of "Up for grabs."
+- **Today, Chores, and Reminders are now three separate tabs** — Today shows just the day's routines; Chores leads with "Today's chores" above the up-for-grabs pool and earnings; Reminders (one-off and recurring) has its own tab. The old non-functional person-selector strip on the Today tab was removed.
 - **Start time shown on calendar pills** (Month/Week/Day) for anything that isn't an all-day event
 - **Recurring reminders** in Settings, in addition to the one-off reminders you can still add from the Today tab — pick which days they show up and they reset automatically each day, no re-adding
 - **Multi-person event color** — an event assigned to more than one person but not everyone now shows as an even color-band split between just those people, instead of silently showing only the first person's color
@@ -117,7 +119,7 @@ This almost always means the write to the database got rejected — most commonl
 
 - **Calendar** as the default screen — tap any day to add, edit, or delete events
 - **Recurring events** (yearly, for birthdays/holidays), **multi-day events** (conference trips), **all-day events** with no one assigned (holiday reminders)
-- **Reminders** — a simple running list on the Today tab, unrelated to a specific date
+- **Reminders** — a simple running list on its own tab, unrelated to a specific date
 - **Routines** split into Morning / Evening / Anytime per kid
 - **Icon picker** — a curated tap-to-select emoji grid instead of typing (works fine on old iPad keyboards)
 - **Configurable pay period** — set any real payday date + weekly/biweekly/monthly, and "this pay period" earnings are calculated from that

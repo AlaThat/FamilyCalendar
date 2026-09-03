@@ -38,8 +38,6 @@
   #tab-calendar{ display:flex; flex-direction:column; flex:1; min-height:0; }
   .hidden{ display:none !important; }
 
-  .family-strip{ display:flex; gap:14px; flex-wrap:wrap; margin-bottom:22px; }
-  .chip{ display:flex; align-items:center; gap:8px; background: var(--white); border:1px solid var(--paper-line); border-radius: 999px; padding:6px 14px 6px 6px; font-weight:600; font-size:14px; }
   .dot{ width:22px; height:22px; border-radius:50%; flex-shrink:0; }
 
   .section-title{ font-family:"Fraunces", Georgia, serif; font-weight:600; font-size:20px; margin: 26px 0 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
@@ -188,20 +186,22 @@
     </section>
 
     <section id="tab-today" class="hidden">
-      <div class="family-strip" id="familyStrip"></div>
-      <div class="section-title">Reminders <button class="small-btn" id="addReminderBtn">+ Add</button></div>
-      <div id="reminderList" style="background:var(--white);border:1px solid var(--paper-line);border-radius:var(--radius);padding:6px 16px;"></div>
       <div class="section-title">Routines</div>
       <div class="member-column" id="routineColumns"></div>
-      <div class="section-title">Today's chores</div>
-      <div class="member-column" id="choreColumns"></div>
     </section>
 
     <section id="tab-chores" class="hidden">
+      <div class="section-title">Today's chores</div>
+      <div class="member-column" id="choreColumns"></div>
       <div class="section-title">Up for grabs</div>
       <div class="pool-grid" id="poolGrid"></div>
       <div class="section-title">Earnings this pay period <span class="section-sub" id="payPeriodLabel"></span></div>
       <div class="earnings-strip" id="earningsStrip"></div>
+    </section>
+
+    <section id="tab-reminders" class="hidden">
+      <div class="section-title">Reminders <button class="small-btn" id="addReminderBtn">+ Add</button></div>
+      <div id="reminderList" style="background:var(--white);border:1px solid var(--paper-line);border-radius:var(--radius);padding:6px 16px;"></div>
     </section>
 
     <section id="tab-settings" class="hidden">
@@ -222,7 +222,7 @@
       </div>
       <div class="settings-block">
         <div class="section-title">Recurring reminders</div>
-        <p class="section-sub">Show up automatically on Today's reminder list on the days you pick, no need to re-add them. For one-off reminders, use the Today tab instead.</p>
+        <p class="section-sub">Show up automatically on the Reminders tab on the days you pick, no need to re-add them. For one-off reminders, use the Reminders tab instead.</p>
         <div id="recurringReminderList"></div>
         <button class="add-row-btn" id="addRecurringReminderBtn">+ Add recurring reminder</button>
       </div>
@@ -255,6 +255,7 @@
     <button data-tab="calendar" class="active">Calendar</button>
     <button data-tab="today">Today</button>
     <button data-tab="chores">Chores</button>
+    <button data-tab="reminders">Reminders</button>
     <button data-tab="settings">Settings</button>
   </nav>
 </div>
@@ -308,7 +309,7 @@ if(firebaseReady){
 
 /* ---------------- State ---------------- */
 const state = {
-  family: [], routines: [], routineLog: {}, chores: [], earnings: [], events: [], reminders: [],
+  family: [], routines: [], routineLog: {}, chores: [], choreLog: {}, earnings: [], events: [], reminders: [],
   recurringReminders: [], recurringReminderLog: {},
   settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '' }
 };
@@ -362,6 +363,11 @@ function initFirestoreListeners(){
   db.collection('recurringReminderLog').where('date','==', todayISO()).onSnapshot(snap=>{
     state.recurringReminderLog = {};
     snap.forEach(doc=>{ const d=doc.data(); state.recurringReminderLog[`${d.date}_${d.reminderId}`]=d.done; });
+    renderAll();
+  });
+  db.collection('choreLog').where('date','==', todayISO()).onSnapshot(snap=>{
+    state.choreLog = {};
+    snap.forEach(doc=>{ const d=doc.data(); state.choreLog[`${d.date}_${d.choreId}`]=d.done; });
     renderAll();
   });
   db.collection('settings').doc('main').onSnapshot(doc=>{
@@ -590,10 +596,6 @@ function recurrenceLabel(rec){
 }
 
 /* ============================== TODAY TAB ============================== */
-function renderFamilyStrip(){
-  document.getElementById('familyStrip').innerHTML = state.family.map(m => `
-    <div class="chip"><span class="dot" style="background:${m.color}"></span>${esc(m.name)}</div>`).join('');
-}
 function renderReminders(){
   const el = document.getElementById('reminderList');
   const recurringTodaySource = state.recurringReminders.slice().sort(byOrder).filter(appliesToday);
@@ -684,6 +686,20 @@ function routineDaysSummary(routine){
   if(allSame) return daysLabel(perMember[0].days);
   return perMember.map(p => `${esc(memberById(p.id)?.name||'?')}: ${daysLabel(p.days)}`).join(' · ');
 }
+/* Assigned chores reuse the exact same per-member days machinery as routines (effectiveDays,
+   effectiveDaysForMember, routineDaysSummary all work on any {assignedTo, perMemberDays, days,
+   schedule} shape, chore or routine alike) — chores just add a `scheduleType` layer on top so a
+   chore can instead be a one-time, single-date job rather than a recurring weekly one. */
+function choreAppliesOnDate(chore, memberId, dateISO){
+  if(chore.scheduleType === 'once') return chore.date === dateISO;
+  return effectiveDaysForMember(chore, memberId).includes(new Date(dateISO+'T00:00:00').getDay());
+}
+function choreScheduleSummary(chore){
+  if(chore.scheduleType === 'once'){
+    return chore.date ? `One time · ${new Date(chore.date+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'})}` : 'One time · no date set';
+  }
+  return routineDaysSummary(chore);
+}
 function renderRoutineColumns(){
   const el = document.getElementById('routineColumns');
   // Kids always get a card (an invitation to add routines even with none yet); adults only
@@ -722,31 +738,36 @@ function toggleRoutine(routineId, memberId){
 }
 function renderChoreColumns(){
   const el = document.getElementById('choreColumns');
-  const kids = state.family.filter(m => m.role === 'child');
   const assigned = state.chores.filter(c => c.type === 'assigned');
-  if(!kids.length || !assigned.length){
+  const today = todayISO();
+  // Kids always get a card once any assigned chore exists at all (even if none apply today,
+  // as an invitation); adults only show up once something is actually assigned to them —
+  // same pattern as routine cards.
+  const members = state.family.filter(m => m.role==='child' || assigned.some(c => (Array.isArray(c.assignedTo)?c.assignedTo:[]).includes(m.id)));
+  if(!members.length || !assigned.length){
     el.innerHTML = '<div class="empty-note">No assigned chores yet — add some in Settings, or check the Chores tab for the up-for-grabs pool.</div>';
     return;
   }
-  el.innerHTML = kids.map(kid => {
-    const items = assigned.filter(c => (Array.isArray(c.assignedTo) ? c.assignedTo : [c.assignedTo].filter(Boolean)).includes(kid.id)).sort(byOrder);
-    if(!items.length) return '';
-    const rows = items.map(c => {
-      const sharedWith = (Array.isArray(c.assignedTo) ? c.assignedTo : []).filter(id=>id!==kid.id).map(id=>memberById(id)?.name).filter(Boolean);
+  el.innerHTML = members.map(member => {
+    const items = assigned.filter(c => (Array.isArray(c.assignedTo) ? c.assignedTo : [c.assignedTo].filter(Boolean)).includes(member.id) && choreAppliesOnDate(c, member.id, today)).sort(byOrder);
+    const rows = items.length ? items.map(c => {
+      const sharedWith = (Array.isArray(c.assignedTo) ? c.assignedTo : []).filter(id=>id!==member.id).map(id=>memberById(id)?.name).filter(Boolean);
+      const done = !!state.choreLog[`${today}_${c.id}`];
       return `<div class="chore-item">
-        <div class="check-btn ${c.status==='done'?'done':''}" data-chore="${c.id}">${c.status==='done'?'✓':''}</div>
+        <div class="check-btn ${done?'done':''}" data-chore="${c.id}">${done?'✓':''}</div>
         <div class="item-icon">${esc(c.icon||'🧹')}</div><div class="item-label">${esc(c.title)}${sharedWith.length?` <span style="font-size:12px;color:var(--ink-soft)">(with ${esc(sharedWith.join(', '))})</span>`:''}</div></div>`;
-    }).join('');
-    return `<div class="member-card" style="border-top-color:${kid.color}">
-      <h3><span class="dot" style="width:16px;height:16px;background:${kid.color}"></span>${esc(kid.name)}</h3>${rows}</div>`;
+    }).join('') : '<div class="empty-note">Nothing today.</div>';
+    return `<div class="member-card" style="border-top-color:${member.color}">
+      <h3><span class="dot" style="width:16px;height:16px;background:${member.color}"></span>${esc(member.name)}</h3>${rows}</div>`;
   }).join('');
   el.querySelectorAll('.check-btn').forEach(btn=> btn.addEventListener('click', ()=> toggleChoreDone(btn.dataset.chore)));
 }
 function toggleChoreDone(choreId){
-  const c = state.chores.find(x=>x.id===choreId); if(!c) return;
-  c.status = c.status === 'done' ? 'open' : 'done';
+  const key = `${todayISO()}_${choreId}`;
+  const newVal = !state.choreLog[key];
+  state.choreLog[key] = newVal;
   renderChoreColumns();
-  if(firebaseReady) dbWrite(db.collection('chores').doc(choreId).update({status:c.status}));
+  if(firebaseReady) dbWrite(db.collection('choreLog').doc(key).set({date:todayISO(), choreId, done:newVal}));
 }
 
 /* ============================== CHORES / POOL / EARNINGS ============================== */
@@ -1327,26 +1348,37 @@ function openRoutineModal(existing){
 }
 function openChoreModal(existing){
   const isEdit = !!existing;
-  const kids = state.family.filter(m=>m.role==='child');
+  const assignableMembers = state.family;
   const modalRoot = document.getElementById('modalRoot');
-  const type = isEdit ? existing.type : 'pool';
+  const type = isEdit ? existing.type : 'assigned';
+  const scheduleType = isEdit ? (existing.scheduleType || 'recurring') : 'recurring';
   modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">
     <button class="close-x" id="closeModal">✕</button>
     <h3>${isEdit?'Edit chore':'Add chore'}</h3>
     <div class="field"><label>Title</label><input type="text" id="chTitle" placeholder="Load dishwasher" value="${isEdit?esc(existing.title):''}"></div>
     <div class="field"><label>Icon</label>${iconPickerHtml('chIcon', isEdit?existing.icon:'🧹')}</div>
     <div class="radio-row">
-      <label><input type="radio" name="chType" value="pool" ${type==='pool'?'checked':''}> Up for grabs (pays $)</label>
       <label><input type="radio" name="chType" value="assigned" ${type==='assigned'?'checked':''}> Assigned, no pay</label>
+      <label><input type="radio" name="chType" value="pool" ${type==='pool'?'checked':''}> Up for grabs (pays $)</label>
     </div>
     <div class="field" id="chValueField" style="${type==='pool'?'':'display:none;'}"><label>Amount</label><input type="number" step="0.25" min="0" id="chValue" value="${isEdit&&existing.value!=null?existing.value:'1'}"></div>
-    <div class="field" id="chAssignField" style="${type==='assigned'?'':'display:none;'}"><label>Assign to (pick one or more to share it)</label>
-      <div class="assignee-toggles" id="chAssignees">
-        ${kids.map(k=>{
-          const on = isEdit && (Array.isArray(existing.assignedTo) ? existing.assignedTo : [existing.assignedTo].filter(Boolean)).includes(k.id);
-          return `<div class="assignee-toggle" data-member="${k.id}" style="--c:${k.color};${on?`background:${k.color};border-color:${k.color};color:white;`:''}">${esc(k.name)}</div>`;
-        }).join('')}
-      </div></div>
+    <div id="chAssignedFields" style="${type==='assigned'?'':'display:none;'}">
+      <div class="field"><label>Assign to (pick one or more to share it)</label>
+        <div class="assignee-toggles" id="chAssignees">
+          ${assignableMembers.map(m=>{
+            const on = isEdit && (Array.isArray(existing.assignedTo) ? existing.assignedTo : [existing.assignedTo].filter(Boolean)).includes(m.id);
+            return `<div class="assignee-toggle" data-member="${m.id}" style="--c:${m.color};${on?`background:${m.color};border-color:${m.color};color:white;`:''}">${esc(m.name)}</div>`;
+          }).join('')}
+        </div></div>
+      <div class="radio-row">
+        <label><input type="radio" name="chScheduleType" value="recurring" ${scheduleType==='recurring'?'checked':''}> Recurring</label>
+        <label><input type="radio" name="chScheduleType" value="once" ${scheduleType==='once'?'checked':''}> One time</label>
+      </div>
+      <div class="field" id="chDaysField" style="${scheduleType==='recurring'?'':'display:none;'}"><label>Which days (set per person)</label>
+        <div id="chDaysContainer"></div>
+      </div>
+      <div class="field" id="chDateField" style="${scheduleType==='once'?'':'display:none;'}"><label>Date</label><input type="date" id="chDate" value="${isEdit&&existing.date?existing.date:''}"></div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-primary" id="chSave">Save</button>
       ${isEdit?'<button class="btn btn-danger" id="chDelete">Remove</button>':''}
@@ -1355,18 +1387,43 @@ function openChoreModal(existing){
   </div></div>`;
   wireIconPicker('chIcon');
   const chSelected = new Set(isEdit ? (Array.isArray(existing.assignedTo) ? existing.assignedTo : [existing.assignedTo].filter(Boolean)) : []);
+  function renderChoreDaysRows(){
+    const container = document.getElementById('chDaysContainer');
+    if(!container) return;
+    const ids = Array.from(chSelected);
+    if(!ids.length){ container.innerHTML = '<div class="empty-note">Pick who this is for above, then set their days.</div>'; return; }
+    container.innerHTML = ids.map(id=>{
+      const member = memberById(id);
+      const days = isEdit ? effectiveDaysForMember(existing, id) : [0,1,2,3,4,5,6];
+      return `<div class="member-days-row" style="border-left-color:${member?member.color:'#ccc'}">
+        <div class="member-days-name">${esc(member?member.name:'?')}</div>
+        <div class="day-checkboxes" data-days-for="${id}">
+          ${DAY_ABBR.map((abbr,d)=>`<label class="day-checkbox"><input type="checkbox" value="${d}" ${days.includes(d)?'checked':''}>${abbr}</label>`).join('')}
+        </div>
+      </div>`;
+    }).join('');
+  }
+  renderChoreDaysRows();
   modalRoot.querySelectorAll('#chAssignees .assignee-toggle').forEach(t=>{
     t.addEventListener('click', ()=>{
       const id = t.dataset.member;
       if(chSelected.has(id)){ chSelected.delete(id); t.style.background=''; t.style.borderColor=''; t.style.color=''; }
       else { chSelected.add(id); t.style.background=t.style.getPropertyValue('--c'); t.style.borderColor=t.style.getPropertyValue('--c'); t.style.color='white'; }
+      renderChoreDaysRows();
     });
   });
   modalRoot.querySelectorAll('input[name=chType]').forEach(r=>{
     r.addEventListener('change', ()=>{
       const v = modalRoot.querySelector('input[name=chType]:checked').value;
       document.getElementById('chValueField').style.display = v==='pool' ? '' : 'none';
-      document.getElementById('chAssignField').style.display = v==='assigned' ? '' : 'none';
+      document.getElementById('chAssignedFields').style.display = v==='assigned' ? '' : 'none';
+    });
+  });
+  modalRoot.querySelectorAll('input[name=chScheduleType]').forEach(r=>{
+    r.addEventListener('change', ()=>{
+      const v = modalRoot.querySelector('input[name=chScheduleType]:checked').value;
+      document.getElementById('chDaysField').style.display = v==='recurring' ? '' : 'none';
+      document.getElementById('chDateField').style.display = v==='once' ? '' : 'none';
     });
   });
   document.getElementById('closeModal').addEventListener('click', closeModal);
@@ -1380,7 +1437,23 @@ function openChoreModal(existing){
     if(chosenType==='pool'){
       data = { title, icon: document.getElementById('chIcon').value.trim()||'🧹', type:'pool', value: parseFloat(document.getElementById('chValue').value)||0, status: isEdit&&existing.status?existing.status:'open', assignedTo:null, claimedBy: isEdit?existing.claimedBy||null:null };
     } else {
-      data = { title, icon: document.getElementById('chIcon').value.trim()||'🧹', type:'assigned', assignedTo: Array.from(chSelected), status: isEdit&&existing.status?existing.status:'open' };
+      const assignedTo = Array.from(chSelected);
+      if(!assignedTo.length){ showToast('Pick at least one person to assign this chore to.'); return; }
+      const chosenScheduleType = modalRoot.querySelector('input[name=chScheduleType]:checked').value;
+      data = { title, icon: document.getElementById('chIcon').value.trim()||'🧹', type:'assigned', assignedTo, scheduleType: chosenScheduleType };
+      if(chosenScheduleType === 'once'){
+        const date = document.getElementById('chDate').value;
+        if(!date){ showToast('Pick a date for this one-time chore.'); return; }
+        data.date = date;
+      } else {
+        const perMemberDays = {};
+        for(const id of assignedTo){
+          const days = Array.from(modalRoot.querySelectorAll(`[data-days-for="${id}"] input:checked`)).map(i=>parseInt(i.value,10));
+          if(!days.length){ showToast(`Pick at least one day for ${esc(memberById(id)?.name||'each person')}.`); return; }
+          perMemberDays[id] = days;
+        }
+        data.perMemberDays = perMemberDays;
+      }
     }
     if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('chores').doc(existing.id).update(data)); }
     else { data.order = state.chores.length; if(firebaseReady) dbWrite(db.collection('chores').add(data)); else state.chores.push({id:uid('local'), ...data}); }
@@ -1452,10 +1525,12 @@ function renderSettings(){
   const cEl = document.getElementById('choreList');
   cEl.innerHTML = sortedChores.map(c=>{
     const assignedNames = (Array.isArray(c.assignedTo) ? c.assignedTo : [c.assignedTo].filter(Boolean)).map(id=>memberById(id)?.name).filter(Boolean).join(', ');
+    const summary = c.type==='pool' ? 'Up for grabs' : choreScheduleSummary(c);
+    const statusText = (c.type==='pool' || summary.includes(' · ')) ? summary : `${summary} · ${esc(assignedNames||'nobody yet')}`;
     return `<div class="list-row">
       <span class="item-icon">${esc(c.icon||'🧹')}</span>
       <div class="grow"><strong>${esc(c.title)}</strong> ${c.type==='pool' ? `<span style="color:var(--accent);font-weight:700;">$${(c.value||0).toFixed(2)}</span>`:''}
-        <span class="status-pill">${c.type==='pool'?'Up for grabs':'Assigned: '+(assignedNames||'—')}</span></div>
+        <span class="status-pill">${statusText}</span></div>
       ${moveArrowsHtml('chores', sortedChores, c.id)}
       <button class="small-btn" data-ch-edit="${c.id}">Edit</button>
     </div>`;
@@ -1546,7 +1621,6 @@ document.querySelectorAll('nav.tabs button').forEach(btn=>{
 
 /* ============================== Master render ============================== */
 function renderAll(){
-  renderFamilyStrip();
   renderReminders();
   renderRoutineColumns();
   renderChoreColumns();
