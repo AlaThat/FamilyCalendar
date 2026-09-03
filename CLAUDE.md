@@ -141,7 +141,7 @@ thing you can do first — it will likely surface real bugs that were never actu
   already isn't a daily thing.
 - `earnings`: `{memberId, amount, title, date, paid}` — one row per completed pool chore
 - `events`: `{title, date, endDate, allDay, startTime, endTime, recurrence:
-  'none'|'daily'|'weekly'|'biweekly'|'monthly-date'|'monthly-weekday'|'yearly', assignees:
+  'none'|'weekly'|'monthly-date'|'monthly-weekday'|'yearly', weeklyDays, weeklyInterval, assignees:
   [memberId] (empty or all-members = "applies to everyone", shown in a distinct dark color; 2+
   members but not everyone shows as an equal-width multi-color gradient split, one band per
   assignee), notes, birthYear, workBlock, tag, order}` — `tag` is used to correlate with the
@@ -155,6 +155,45 @@ thing you can do first — it will likely surface real bugs that were never actu
   same-day tie-break rank shifts it on every day it occurs, not just the one you reordered it
   from — an accepted simplification rather than a per-occurrence order override, since same-day
   all-day collisions on a recurring event are a rare edge case.
+
+  **Weekly recurrence** (`recurrence==='weekly'`) carries an explicit `weeklyDays: [0-6]` +
+  `weeklyInterval: N` — an event can repeat on more than one day per week (e.g. practice every
+  Mon+Thu) and/or every N weeks instead of every week, mirroring the Outlook-style recurrence
+  picker rather than the old fixed daily/weekly/biweekly options. This replaced the separate
+  `'daily'`/`'biweekly'` recurrence values (each of which could only repeat on a single fixed
+  day); those old values are read through the same legacy-fallback pattern as routines/chores
+  (`eventWeeklyDays()`/`eventWeeklyInterval()`, never migrated) rather than a batch migration —
+  `'daily'` becomes "every day of the week, every week," a `'weekly'` or `'biweekly'` doc with no
+  `weeklyDays` becomes "just its own day-of-week, every 1 or 2 weeks." The interval is counted in
+  whole calendar weeks (Sun-anchored) from the event's own start date, not in raw day counts, so
+  a multi-day pattern (Mon+Thu) skips the *same* in-between week for every selected day, matching
+  how Outlook's own "every N weeks" picker behaves.
+
+- `eventExceptions`: doc id `${eventId}_${originalDate}` → `{eventId, date, deleted}` or
+  `{eventId, date, deleted:false, overrides:{...any event fields...}}` — same
+  composite-string-is-the-doc-id convention as `routineLog`/`choreLog`/`recurringReminderLog`, so
+  saving is always a plain upsert with no need to check whether a doc already exists first, just
+  storing a richer override object instead of a boolean. Backs **editing or deleting a single
+  occurrence vs. the whole series**: tapping a recurring event (a pill in Month/Week/Day view, or
+  Edit/Delete in the day-list modal) opens `openRecurrenceScopeModal()` first — "this date" vs
+  "the whole series" — before anything else happens; a non-recurring event skips straight to its
+  own edit form as before, since there's only one occurrence to talk about. "The whole series"
+  behaves exactly like editing/deleting always did (writes/removes the base `events` doc). "This
+  date" instead reads/writes one `eventExceptions` doc: `deleted:true` skips that occurrence
+  entirely; `overrides` holds this occurrence's title, date/time, notes, assignees, and/or
+  work-block flag where they differ from the series — including moving it to a different date,
+  e.g. "this week's practice is on Wednesday instead." `eventsOnDate()` layers these on top of the
+  normal recurrence math: for a date the event would normally occur on, an active exception
+  suppresses it (deleted) or substitutes its overridden fields in place; separately, every event's
+  exceptions are also scanned for one whose *overridden* date lands on the date being rendered, so
+  a moved occurrence shows up on its new date instead of its original slot. `occurrenceDate` is
+  stamped onto every rendered occurrence (the original, un-moved slot date — i.e. the exception
+  key) specifically so editing/deleting an already-moved occurrence again still finds the right
+  exception doc regardless of which date it's currently displayed on. Deleting the whole series
+  also deletes its exception docs, so they don't linger as orphans. Occurrence-level edits
+  deliberately omit `recurrence`/`weeklyDays`/`weeklyInterval`/`endDate`/`birthYear` from what can
+  be overridden — those describe the *series*, not one date, so the edit form hides the Repeats
+  section entirely when editing just one occurrence.
 - `reminders`: `{text, done, order}` — one-off, manually added/removed from the Reminders tab,
   done state persists until deleted.
 - `recurringReminders`: `{text, schedule: 'daily'|'weekday'|'weekend', order}` — configured in
@@ -244,7 +283,6 @@ etc.) is intentional and should stay generic.
 - Real drag-and-drop event rescheduling (deferred — see above)
 - External calendar import/subscription (deferred — see above)
 - True update flow for work-calendar Outlook blocks (currently remove-then-add)
-- Editing a single occurrence of a recurring event (currently edits/deletes the whole series)
 
 ## Files
 

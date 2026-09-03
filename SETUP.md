@@ -88,7 +88,8 @@ Trigger on subject `[FAMILYBLOCK-REMOVE]` → **Get calendar view of events (V3)
 - **Notes field on events** — free text for a location or other details, shown in the day list and in Day view
 - **Birthday age tracking** — yearly-recurring events (birthdays, etc.) can have a birth year; the calendar then shows "(turning N)" next to the title, computed fresh from the event's actual date each time, so it's correct every year with no yearly upkeep
 - **Person filter** — tap a family member's name to see just their items; events assigned to everyone (or left unassigned, like a holiday) show in a distinct dark color and always appear regardless of filter
-- **Real recurrence options** — daily, weekly, every 2 weeks, monthly (same date), monthly (same weekday — "1st Tuesday"), yearly — not just yearly
+- **Outlook-style weekly recurrence** — pick any combination of days (e.g. practice every Mon+Thu) and repeat every 1, 2, or more weeks, plus monthly (same date), monthly (same weekday — "1st Tuesday"), and yearly
+- **Edit or delete just one date of a repeating event, without touching the rest of the series** — tapping a repeating event asks "this date" or "the whole series" first; editing one date lets you retitle it, move it to a different date/time, add notes, or reassign it, and the rest of the series is unaffected
 - Full edit/delete on calendar events, multi-day events, all-day events with no one assigned, changing an event's date without deleting and re-adding it
 - **Shared assigned chores** — an unpaid chore can be assigned to more than one person at once, the same tap-to-toggle picker as routines; whoever checks it off marks it done for everyone sharing it
 - **Chores have the same per-person day scheduling as routines, plus a one-time option** — an assigned chore can either recur on different days for each person assigned (e.g. sweep Mon/Wed, vacuum Tue), or be scheduled for a single specific date and never repeat (e.g. "pick up all the stuffies tomorrow"). New chores default to "Assigned, no pay" instead of "Up for grabs."
@@ -103,7 +104,7 @@ Trigger on subject `[FAMILYBLOCK-REMOVE]` → **Get calendar view of events (V3)
 - **Manual reordering** — routines, chores, and recurring reminders each have ▲/▼ arrows in their Settings list to fix the order they show in without deleting and re-adding anything; one-off reminders on the Today tab have the same arrows directly on their rows
 - **Routines can be assigned to parents too, not just kids** — a parent with at least one routine shows up on the Today tab with their own card, just like a kid
 - **Each person on a routine can have their own days** (Sun–Sat checkboxes, default all checked) — e.g. one kid's bath nights can be Sun/Wed/Fri while another's are Mon/Thu/Sat, all on the same "Evening Bath" routine, no need to create separate routines per person
-- Reminders on Today, routines split Morning/Evening/Anytime, configurable pay period, sign-in gate, no personal data in the public source
+- Reminders on their own tab, routines split Morning/Evening/Anytime, configurable pay period, sign-in gate, no personal data in the public source
 - Home Screen tiles check for their own updates automatically every 30 minutes and reload themselves once no form is open — see "Set up the iPad as a wall display" above
 
 ## Deliberately not built yet — flagging the tradeoff, not silently skipping
@@ -129,6 +130,5 @@ This almost always means the write to the database got rejected — most commonl
 
 ## Still manual / not built
 
-- Editing an *individual occurrence* of a yearly recurring event isn't supported — editing changes all future years, deleting removes the whole series
 - The "from" identity on trigger emails is whatever inbox you connect in EmailJS's dashboard, not something swappable from the app's Settings
 - No automated Outlook *update* — if you edit a work-block event's time, the app resends a remove-then-add pair rather than a true update, so double-check Outlook after editing one
