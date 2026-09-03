@@ -107,10 +107,31 @@ thing you can do first — it will likely surface real bugs that were never actu
   refreshes live as assignees are toggled on/off.
 - `routineLog`: doc id `${date}_${routineId}_${memberId}` → `{date, routineId, memberId, done}`
 - `chores`: `{title, icon, type: 'pool'|'assigned', value, status: 'open'|'claimed'|'done',
-  assignedTo, claimedBy, order}` — for `type==='assigned'`, `assignedTo` is `[memberId]` (can be
-  more than one kid, like routines — a shared chore with one shared `status`, so any assignee
-  checking it off marks it done for all of them, since assigned chores are unpaid). For
-  `type==='pool'`, `assignedTo` is unused (`null`) and `claimedBy` is a single memberId.
+  assignedTo, claimedBy, scheduleType: 'recurring'|'once', perMemberDays, date, order}` — for
+  `type==='pool'`, `assignedTo` is unused (`null`), `claimedBy` is a single memberId, and
+  `status` tracks the claim lifecycle as before; scheduling fields don't apply to pool chores
+  (anyone can grab one any day). For `type==='assigned'`, `assignedTo` is `[memberId]` (can be
+  more than one person, like routines — a shared chore, so any assignee checking it off marks it
+  done for all of them, since assigned chores are unpaid), and scheduling reuses the exact
+  per-person day-of-week machinery built for routines: `scheduleType==='recurring'` chores carry
+  `perMemberDays` and are read through `effectiveDaysForMember(chore, memberId)` exactly like a
+  routine; `scheduleType==='once'` chores instead carry a single shared `date` (not per-member —
+  a one-time chore happens on one calendar date regardless of who's doing it) and show up only on
+  that date, for things like "pick up all the stuffies tomorrow" that shouldn't recur weekly.
+  `choreAppliesOnDate(chore, memberId, dateISO)` is the single place that branches on
+  `scheduleType` to answer "does this chore apply to this person on this date," mirroring
+  `effectiveDaysForMember`'s role for routines; `choreScheduleSummary(chore)` renders the
+  Settings-list summary text ("One time · Sep 4" vs. the routine-style days summary). Assigned
+  chores no longer use `status` for completion — see `choreLog` below — `status` on an assigned
+  chore doc is legacy/unused once edited under this scheme, kept around rather than migrated,
+  same reasoning as routines' legacy-shape fallback.
+- `choreLog`: doc id `${date}_${choreId}` → `{date, choreId, done}` — per-day completion state
+  for assigned chores, the same reset-every-day pattern as `routineLog`/`recurringReminderLog`.
+  This replaced a real latent bug: before `choreLog` existed, an assigned chore's completion was
+  a permanent field on the chore doc with no daily reset, which would have been badly broken once
+  assigned chores could recur (checking one off Monday would have kept it looking "done" forever,
+  including on Wednesday). Pool chores don't use `choreLog` — their `status`/`claimedBy` lifecycle
+  already isn't a daily thing.
 - `earnings`: `{memberId, amount, title, date, paid}` — one row per completed pool chore
 - `events`: `{title, date, endDate, allDay, startTime, endTime, recurrence:
   'none'|'daily'|'weekly'|'biweekly'|'monthly-date'|'monthly-weekday'|'yearly', assignees:
@@ -127,10 +148,10 @@ thing you can do first — it will likely surface real bugs that were never actu
   same-day tie-break rank shifts it on every day it occurs, not just the one you reordered it
   from — an accepted simplification rather than a per-occurrence order override, since same-day
   all-day collisions on a recurring event are a rare edge case.
-- `reminders`: `{text, done, order}` — one-off, manually added/removed from the Today tab, done
-  state persists until deleted.
+- `reminders`: `{text, done, order}` — one-off, manually added/removed from the Reminders tab,
+  done state persists until deleted.
 - `recurringReminders`: `{text, schedule: 'daily'|'weekday'|'weekend', order}` — configured in
-  Settings; shows up automatically on Today's reminder list (marked with a ↻) on its scheduled
+  Settings; shows up automatically on the Reminders tab's list (marked with a ↻) on its scheduled
   days. (Kept the simpler 3-option `schedule` here rather than switching to `days` like routines
   — reminders don't have the "different days per kid" need that motivated the routine change.)
 - `recurringReminderLog`: doc id `${date}_${reminderId}` → `{date, reminderId, done}` — same
@@ -141,7 +162,7 @@ thing you can do first — it will likely surface real bugs that were never actu
 
 **Manual reordering.** Routines, chores, and recurring reminders each show ▲/▼ arrows in their
 Settings list (disabled at the ends of the list); manual one-off reminders show the same arrows
-directly on the Today tab, since they have no Settings screen of their own. `moveInList()`
+directly on the Reminders tab, since they have no Settings screen of their own. `moveInList()`
 handles all four: on every arrow click it swaps the two adjacent items and renumbers the *whole*
 visible list sequentially (0, 1, 2, ...) rather than just swapping two raw `order` values — this
 self-heals any pre-existing item with a missing/duplicate `order` (e.g. data from before this
@@ -180,6 +201,14 @@ apply to everyone. Bottom navigation (not top) — there is no top header/brandi
 (removed deliberately to reclaim vertical space on the iPad); the on-screen headline is the
 current month/week/day. The "Sign out" control lives at the bottom of the Settings tab instead
 of a header, since there's nowhere else on-screen it belongs.
+
+**Five tabs: Calendar, Today, Chores, Reminders, Settings.** Today is routines-only now — it used
+to also show a person-selector strip and the reminders list, both removed: the person-selector
+strip never actually filtered anything (dead UI), and reminders got their own tab since they're
+conceptually unrelated to routines. Chores leads with "Today's chores" (assigned chores due
+today, same per-member card layout as Today's routines) above the existing "Up for grabs" pool
+and earnings strip — this used to live on the Today tab. Reminders holds both the manual one-off
+list and its add/reorder controls, unchanged in behavior from before, just relocated.
 
 ## User context (for tone/scope calibration, not for hardcoding into the app)
 
