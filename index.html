@@ -19,7 +19,7 @@
 <style>
   :root{
     --paper: #F6F1E4; --paper-line: #E4DBC4; --ink: #2C2A24; --ink-soft: #6B6656;
-    --accent: #B5542C; --white: #FFFDF8; --radius: 10px; --everyone: #3A362C;
+    --accent: #B5542C; --white: #FFFDF8; --radius: 10px; --everyone: #3A362C; --everyone-text: #FFFFFF;
   }
   *{ box-sizing: border-box; }
   html,body{ margin:0; padding:0; height:100%; background: var(--paper); color: var(--ink);
@@ -124,6 +124,9 @@
   .icon-grid{ display:grid; grid-template-columns: repeat(8, 1fr); gap:6px; margin-bottom:8px; }
   .icon-opt{ font-size:20px; text-align:center; padding:6px 0; border-radius:8px; border:2px solid transparent; cursor:pointer; background:var(--paper); }
   .icon-opt.on{ border-color: var(--accent); background:#FCEFE4; }
+  .swatch-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .swatch-opt{ width:26px; height:26px; border-radius:50%; border:2px solid var(--paper-line); cursor:pointer; }
+  .swatch-opt.on{ border-color:var(--ink); box-shadow:0 0 0 2px var(--white), 0 0 0 4px var(--ink); }
   .modal-actions{ display:flex; gap:10px; margin-top:18px; flex-wrap:wrap; }
   .btn{ border:none; border-radius:8px; padding:11px 18px; font-weight:700; cursor:pointer; font-size:15px; font-family:inherit; }
   .btn-primary{ background: var(--ink); color:white; }
@@ -209,6 +212,13 @@
         <div class="section-title">Family members</div>
         <div id="familyList"></div>
         <button class="add-row-btn" id="addFamilyBtn">+ Add family member</button>
+      </div>
+      <div class="settings-block">
+        <div class="section-title">"Everyone" event color</div>
+        <p class="section-sub">Used for events with no one assigned, or assigned to the whole family — on the calendar and the person filter.</p>
+        <div class="field"><label>Background color</label><input type="color" id="everyoneColorInput"></div>
+        <div class="field"><label>Text color</label><div id="everyoneTextColorField"></div></div>
+        <button class="btn btn-primary" id="saveEveryoneColorBtn">Save</button>
       </div>
       <div class="settings-block">
         <div class="section-title">Daily routines</div>
@@ -311,13 +321,41 @@ if(firebaseReady){
 const state = {
   family: [], routines: [], routineLog: {}, chores: [], choreLog: {}, earnings: [], events: [], reminders: [],
   recurringReminders: [], recurringReminderLog: {},
-  settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '' }
+  settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '', everyoneColor: '#3A362C', everyoneTextColor: '#FFFFFF' }
 };
 const todayISO = () => new Date().toISOString().slice(0,10);
 const isoOf = d => d.toISOString().slice(0,10);
 const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function memberById(id){ return state.family.find(m => m.id === id); }
 function colorOf(id){ const m = memberById(id); return m ? m.color : '#999'; }
+const TEXT_COLOR_PRESETS = ['#FFFFFF','#000000','#333333','#777777','#CCCCCC'];
+function textColorOf(id){ const m = memberById(id); return (m && m.textColor) || '#FFFFFF'; }
+function applyEveryoneColorVars(){
+  document.documentElement.style.setProperty('--everyone', state.settings.everyoneColor || '#3A362C');
+  document.documentElement.style.setProperty('--everyone-text', state.settings.everyoneTextColor || '#FFFFFF');
+}
+function colorFieldHtml(inputId, currentHex, presets){
+  return `<div class="swatch-row">
+    <input type="color" id="${inputId}" value="${currentHex}" style="width:44px;height:36px;padding:0;border:1px solid var(--paper-line);border-radius:6px;">
+    <div class="swatch-row" id="${inputId}_presets">
+      ${presets.map(hex=>`<div class="swatch-opt ${hex.toLowerCase()===currentHex.toLowerCase()?'on':''}" data-hex="${hex}" style="background:${hex};" title="${hex}"></div>`).join('')}
+    </div>
+  </div>`;
+}
+function wireColorField(inputId){
+  const input = document.getElementById(inputId);
+  const row = document.getElementById(inputId+'_presets');
+  row.querySelectorAll('.swatch-opt').forEach(sw=>{
+    sw.addEventListener('click', ()=>{
+      input.value = sw.dataset.hex;
+      row.querySelectorAll('.swatch-opt').forEach(s=>s.classList.remove('on'));
+      sw.classList.add('on');
+    });
+  });
+  input.addEventListener('input', ()=>{
+    row.querySelectorAll('.swatch-opt').forEach(s=> s.classList.toggle('on', s.dataset.hex.toLowerCase()===input.value.toLowerCase()));
+  });
+}
 function uid(prefix){ return prefix + Date.now() + Math.floor(Math.random()*1000); }
 function esc(str){
   return String(str==null?'':str).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -371,7 +409,7 @@ function initFirestoreListeners(){
     renderAll();
   });
   db.collection('settings').doc('main').onSnapshot(doc=>{
-    if(doc.exists) state.settings = Object.assign({payPeriodAnchor:null,payPeriodType:'biweekly',workEmailTo:''}, doc.data());
+    if(doc.exists) state.settings = Object.assign({payPeriodAnchor:null,payPeriodType:'biweekly',workEmailTo:'',everyoneColor:'#3A362C',everyoneTextColor:'#FFFFFF'}, doc.data());
     renderAll();
   });
 }
@@ -587,6 +625,7 @@ function eventColor(e){
   return `linear-gradient(90deg, ${stops})`;
 }
 function eventBorderColor(e){ return isEveryoneEvent(e) ? 'var(--everyone)' : colorOf((e.assignees||[])[0]); }
+function eventTextColor(e){ return isEveryoneEvent(e) ? 'var(--everyone-text)' : textColorOf((e.assignees||[])[0]); }
 let calPersonFilter = null;
 function passesPersonFilter(e){ if(!calPersonFilter) return true; return isEveryoneEvent(e) || (e.assignees||[]).includes(calPersonFilter); }
 function eventsOnDateFiltered(dateISO){ return eventsOnDate(dateISO).filter(passesPersonFilter); }
@@ -947,7 +986,7 @@ function renderMonthGrid(){
     const iso = isoOf(cellDate);
     const isToday = iso === todayISO();
     const dayEvents = eventsOnDateFiltered(iso);
-    const evtHtml = dayEvents.slice(0,3).map(e=> `<div class="cal-evt ${e.allDay?'allday':''}" data-event-id="${e.id}" style="background:${eventColor(e)}">${esc(displayEventTitle(e, iso))}${!e.allDay&&e.startTime?` <strong>${esc(formatTime12(e.startTime))}</strong>`:''}</div>`).join('');
+    const evtHtml = dayEvents.slice(0,3).map(e=> `<div class="cal-evt ${e.allDay?'allday':''}" data-event-id="${e.id}" style="background:${eventColor(e)};color:${eventTextColor(e)}">${esc(displayEventTitle(e, iso))}${!e.allDay&&e.startTime?` <strong>${esc(formatTime12(e.startTime))}</strong>`:''}</div>`).join('');
     cells += `<div class="cal-cell ${monthOffset!==0?'other-month':''} ${isToday?'today':''}" data-date="${iso}">
       <div class="cal-date-num">${dayNum}${moonBadge(iso)}</div>${evtHtml}
       ${dayEvents.length>3?`<div style="font-size:11px;color:var(--ink-soft)">+${dayEvents.length-3} more</div>`:''}
@@ -973,7 +1012,7 @@ function renderWeekGrid(){
     const dayEvents = eventsOnDateFiltered(iso);
     html += `<div class="week-col ${isToday?'today':''}" data-date="${iso}">
       <div class="week-col-head">${DOW[d.getDay()]}<span class="cal-date-num">${d.getDate()}${moonBadge(iso)}</span></div>
-      ${dayEvents.length ? dayEvents.map(e=>`<div class="week-evt" data-event-id="${e.id}" style="background:${eventColor(e)}">${esc(displayEventTitle(e, iso))} <strong>${e.allDay?'All day':esc(formatTime12(e.startTime))}</strong></div>`).join('') : ''}
+      ${dayEvents.length ? dayEvents.map(e=>`<div class="week-evt" data-event-id="${e.id}" style="background:${eventColor(e)};color:${eventTextColor(e)}">${esc(displayEventTitle(e, iso))} <strong>${e.allDay?'All day':esc(formatTime12(e.startTime))}</strong></div>`).join('') : ''}
     </div>`;
   }
   grid.innerHTML = html;
@@ -1254,19 +1293,21 @@ function openFamilyModal(existing){
       <option value="child" ${isEdit&&existing.role==='child'?'selected':''}>Child</option>
     </select></div>
     <div class="field"><label>Color</label><input type="color" id="famColor" value="${isEdit?existing.color:'#'+Math.floor(Math.random()*16777215).toString(16).padStart(6,'0')}"></div>
+    <div class="field"><label>Text color (for calendar pills)</label>${colorFieldHtml('famTextColor', (isEdit&&existing.textColor)||'#FFFFFF', TEXT_COLOR_PRESETS)}</div>
     <div class="modal-actions">
       <button class="btn btn-primary" id="famSave">Save</button>
       ${isEdit?'<button class="btn btn-danger" id="famDelete">Remove</button>':''}
       <button class="btn btn-secondary" id="famCancel">Cancel</button>
     </div>
   </div></div>`;
+  wireColorField('famTextColor');
   document.getElementById('closeModal').addEventListener('click', closeModal);
   document.getElementById('famCancel').addEventListener('click', closeModal);
   document.getElementById('backdrop').addEventListener('click', e=>{ if(e.target.id==='backdrop') closeModal(); });
   document.getElementById('famSave').addEventListener('click', ()=>{
     const name = document.getElementById('famName').value.trim();
     if(!name){ showToast('Name it first.'); return; }
-    const data = { name, role: document.getElementById('famRole').value, color: document.getElementById('famColor').value };
+    const data = { name, role: document.getElementById('famRole').value, color: document.getElementById('famColor').value, textColor: document.getElementById('famTextColor').value };
     if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('family').doc(existing.id).update(data)); }
     else { data.order = state.family.length; if(firebaseReady) dbWrite(db.collection('family').add(data)); else state.family.push({id:uid('local'), ...data}); }
     renderAll(); closeModal();
@@ -1551,6 +1592,15 @@ function renderSettings(){
   rrEl.querySelectorAll('[data-rr-edit]').forEach(btn=> btn.addEventListener('click', ()=> openRecurringReminderModal(state.recurringReminders.find(x=>x.id===btn.dataset.rrEdit))));
   wireMoveArrows(rrEl, { recurringReminders: sortedRecurringReminders });
 
+  const everyoneColorInput = document.getElementById('everyoneColorInput');
+  if(everyoneColorInput && document.activeElement !== everyoneColorInput) everyoneColorInput.value = state.settings.everyoneColor || '#3A362C';
+  const everyoneTextColorField = document.getElementById('everyoneTextColorField');
+  const etcInput = document.getElementById('everyoneTextColorInput');
+  if(everyoneTextColorField && (!etcInput || document.activeElement !== etcInput)){
+    everyoneTextColorField.innerHTML = colorFieldHtml('everyoneTextColorInput', state.settings.everyoneTextColor || '#FFFFFF', TEXT_COLOR_PRESETS);
+    wireColorField('everyoneTextColorInput');
+  }
+
   const anchorInput = document.getElementById('payAnchorInput');
   const typeInput = document.getElementById('payTypeInput');
   if(anchorInput && document.activeElement !== anchorInput) anchorInput.value = state.settings.payPeriodAnchor || todayISO();
@@ -1607,6 +1657,15 @@ document.getElementById('saveWorkEmailBtn').addEventListener('click', ()=>{
   if(firebaseReady) dbWrite(db.collection('settings').doc('main').set(data, {merge:true}));
   renderAll();
 });
+document.getElementById('saveEveryoneColorBtn').addEventListener('click', ()=>{
+  const data = Object.assign({}, state.settings, {
+    everyoneColor: document.getElementById('everyoneColorInput').value,
+    everyoneTextColor: document.getElementById('everyoneTextColorInput').value,
+  });
+  state.settings = data;
+  if(firebaseReady) dbWrite(db.collection('settings').doc('main').set(data, {merge:true}));
+  renderAll();
+});
 
 /* ============================== Tabs ============================== */
 document.querySelectorAll('nav.tabs button').forEach(btn=>{
@@ -1621,6 +1680,7 @@ document.querySelectorAll('nav.tabs button').forEach(btn=>{
 
 /* ============================== Master render ============================== */
 function renderAll(){
+  applyEveryoneColorVars();
   renderReminders();
   renderRoutineColumns();
   renderChoreColumns();

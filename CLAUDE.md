@@ -86,7 +86,14 @@ thing you can do first — it will likely surface real bugs that were never actu
 
 ## Data model (Firestore collections)
 
-- `family`: `{name, role: 'parent'|'child', color, order}`
+- `family`: `{name, role: 'parent'|'child', color, textColor, order}`. `textColor` is the text
+  color used on that person's calendar event pills (Month/Week views, where the pill background
+  is their `color`) — a hex string, defaulting to white (`#FFFFFF`) via `textColorOf()`'s fallback
+  when unset (legacy members, or any doc saved before this field existed), same fallback-on-read
+  pattern as everywhere else in this app rather than a migration. Chosen via a native color input
+  plus a row of white/black/gray-variant preset swatches (`colorFieldHtml()`/`wireColorField()`,
+  a small reusable component also used for the "everyone" text color below), since white-on-white
+  or white-on-a-light-color background pills were unreadable before this existed.
 - `routines`: `{title, icon, timeOfDay: 'morning'|'evening'|'anytime', assignedTo: [memberId],
   perMemberDays: {memberId: [0-6]} (Sun=0..Sat=6), order}`. `assignedTo` is no longer kids-only —
   routines can be assigned to parents too (e.g. a "take vitamins" routine), and a member with at
@@ -157,8 +164,17 @@ thing you can do first — it will likely surface real bugs that were never actu
 - `recurringReminderLog`: doc id `${date}_${reminderId}` → `{date, reminderId, done}` — same
   per-day-reset pattern as `routineLog`, just without a `memberId` since reminders aren't
   per-person.
-- `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly',
-  workEmailTo}`
+- `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly', workEmailTo,
+  everyoneColor, everyoneTextColor}`. `everyoneColor`/`everyoneTextColor` (hex strings, default
+  `#3A362C`/`#FFFFFF`, same fallback-on-read pattern as the rest of `settings/main`) are the
+  background/text color for "everyone" events — anything with no assignees or assigned to the
+  whole family, including the computed holidays/seasons/DST entries (they're synthesized as
+  zero-assignee events, so they pick this up automatically with no extra code) and the "Everyone"
+  chip in the calendar's person filter. Previously this was a hardcoded, non-editable
+  `--everyone` CSS custom property; it's now still a CSS var (`--everyone` / `--everyone-text`,
+  every existing `var(--everyone)` usage kept working unchanged) but `applyEveryoneColorVars()`
+  re-syncs both from `state.settings` on every `renderAll()`, so a Settings save takes effect
+  everywhere the var is used without hunting down each call site individually.
 
 **Manual reordering.** Routines, chores, and recurring reminders each show ▲/▼ arrows in their
 Settings list (disabled at the ends of the list); manual one-off reminders show the same arrows
@@ -196,8 +212,9 @@ Paper-calendar aesthetic, not a SaaS dashboard — established deliberately per 
 requiring distinctive, non-templated choices. Warm cream/paper background (`#F6F1E4`), dark ink
 text (`#2C2A24`), Fraunces serif for headings/date numbers, system sans for everything else
 (no custom body webfont — performance on old iPad hardware). Family member colors are the only
-real accent colors in the UI; a fixed dark neutral (`--everyone: #3A362C`) marks events that
-apply to everyone. Bottom navigation (not top) — there is no top header/branding bar at all
+real accent colors in the UI; a dark neutral by default (`--everyone`, editable in Settings, see
+`everyoneColor`/`everyoneTextColor` above) marks events that apply to everyone. Bottom navigation
+(not top) — there is no top header/branding bar at all
 (removed deliberately to reclaim vertical space on the iPad); the on-screen headline is the
 current month/week/day. The "Sign out" control lives at the bottom of the Settings tab instead
 of a header, since there's nowhere else on-screen it belongs.
