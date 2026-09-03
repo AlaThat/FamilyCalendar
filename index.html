@@ -115,6 +115,9 @@
   .checkbox-row{ display:flex; align-items:center; gap:8px; font-size:15px; margin-bottom:14px; }
   .checkbox-row label{ margin:0; font-weight:400; }
   .radio-row{ display:flex; gap:16px; font-size:15px; margin-bottom:10px; flex-wrap:wrap; }
+  .day-checkboxes{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+  .day-checkbox{ display:flex; flex-direction:column; align-items:center; gap:4px; font-size:12px; font-weight:600; color:var(--ink-soft); }
+  .day-checkbox input{ width:20px; height:20px; }
   .radio-row label{ display:flex; align-items:center; gap:6px; font-weight:400; }
   .assignee-toggles{ display:flex; gap:8px; flex-wrap:wrap; }
   .assignee-toggle{ padding:7px 12px; border-radius:999px; border:2px solid var(--paper-line); cursor:pointer; font-size:14px; font-weight:600; background:var(--white); }
@@ -535,7 +538,17 @@ function moonBadge(dateISO){
   const phase = moonPhaseIconForDate(dateISO);
   return phase ? ` <span class="moon-badge" title="${esc(phase.name)}">${phase.icon}</span>` : '';
 }
-function eventsOnDate(dateISO){ return state.events.filter(e => eventOccursOnDate(e, dateISO)).concat(computedEventsOnDate(dateISO)); }
+function sortEventsForDisplay(events){
+  return events.slice().sort((a,b)=>{
+    const tier = e => e.holiday ? 0 : (e.allDay ? 1 : 2); // computed all-day first, then real all-day, then timed
+    const ta = tier(a), tb = tier(b);
+    if(ta !== tb) return ta - tb;
+    if(ta === 1) return (a.order||0) - (b.order||0); // real all-day: user-controlled tie-break
+    if(ta === 2) return (a.startTime||'').localeCompare(b.startTime||''); // timed: by start time
+    return 0; // computed entries: stable insertion order
+  });
+}
+function eventsOnDate(dateISO){ return sortEventsForDisplay(state.events.filter(e => eventOccursOnDate(e, dateISO)).concat(computedEventsOnDate(dateISO))); }
 function defaultEventTime(){ const d = new Date(); return String(d.getHours()).padStart(2,'0')+':00'; }
 function formatTime12(hhmm){
   if(!hhmm) return '';
@@ -581,19 +594,23 @@ function renderFamilyStrip(){
 }
 function renderReminders(){
   const el = document.getElementById('reminderList');
-  const recurringToday = state.recurringReminders.filter(routineAppliesToday).map(r=>({
+  const recurringTodaySource = state.recurringReminders.slice().sort(byOrder).filter(appliesToday);
+  const recurringToday = recurringTodaySource.map(r=>({
     id: 'rr_'+r.id, sourceId: r.id, text: r.text, recurring: true,
     done: !!state.recurringReminderLog[`${todayISO()}_${r.id}`]
   }));
-  const manual = state.reminders.map(r=> ({ ...r, recurring:false }));
+  const sortedManual = state.reminders.slice().sort(byOrder);
+  const manual = sortedManual.map(r=> ({ ...r, recurring:false }));
   const all = [...recurringToday, ...manual];
   if(!all.length){ el.innerHTML = '<div class="empty-note">Nothing on the list.</div>'; return; }
   el.innerHTML = all.map(r=>`
     <div class="reminder-item">
       <div class="check-btn ${r.done?'done':''}" data-rem-toggle="${r.id}" data-recurring="${r.recurring}" data-source="${r.sourceId||''}">${r.done?'✓':''}</div>
       <div class="item-label" style="${r.done?'text-decoration:line-through;color:var(--ink-soft);':''}">${esc(r.text)}${r.recurring?' <span title="repeats" style="font-size:11px;color:var(--ink-soft);">↻</span>':''}</div>
+      ${r.recurring ? moveArrowsHtml('recurringReminders', recurringTodaySource, r.sourceId) : moveArrowsHtml('reminders', sortedManual, r.id)}
       ${r.recurring?'':`<button class="del-x" data-rem-del="${r.id}">✕</button>`}
     </div>`).join('');
+  wireMoveArrows(el, { recurringReminders: recurringTodaySource, reminders: sortedManual });
   el.querySelectorAll('[data-rem-toggle]').forEach(btn=> btn.addEventListener('click', ()=>{
     if(btn.dataset.recurring === 'true'){
       const key = `${todayISO()}_${btn.dataset.source}`;
@@ -621,23 +638,37 @@ document.getElementById('addReminderBtn').addEventListener('click', ()=>{
   document.getElementById('backdrop').addEventListener('click', e=>{ if(e.target.id==='backdrop') closeModal(); });
   document.getElementById('remSave').addEventListener('click', ()=>{
     const text = document.getElementById('remText').value.trim(); if(!text) return;
-    const data = { text, done:false };
+    const data = { text, done:false, order: state.reminders.length };
     if(firebaseReady) dbWrite(db.collection('reminders').add(data)); else state.reminders.push({id:uid('local'), ...data});
     renderAll(); closeModal();
   });
 });
-function routineAppliesToday(r){
-  const dow = new Date().getDay();
-  if(r.schedule === 'weekday') return dow>=1 && dow<=5;
-  if(r.schedule === 'weekend') return dow===0 || dow===6;
-  return true;
+const DAY_ABBR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function daysArrayForSchedule(schedule){
+  if(schedule === 'weekday') return [1,2,3,4,5];
+  if(schedule === 'weekend') return [0,6];
+  return [0,1,2,3,4,5,6]; // 'daily' or unset
 }
+function effectiveDays(r){
+  // New routines store an explicit `days` array (per-day checkboxes); older routines and
+  // recurring reminders still carry the original daily/weekday/weekend `schedule` field —
+  // derive the equivalent days from that so both shapes work everywhere transparently.
+  return Array.isArray(r.days) ? r.days : daysArrayForSchedule(r.schedule);
+}
+function daysLabel(days){
+  const set = new Set(days);
+  if([0,1,2,3,4,5,6].every(d=>set.has(d))) return 'Every day';
+  if([1,2,3,4,5].every(d=>set.has(d)) && !set.has(0) && !set.has(6)) return 'Weekdays';
+  if([0,6].every(d=>set.has(d)) && [1,2,3,4,5].every(d=>!set.has(d))) return 'Weekends';
+  return [0,1,2,3,4,5,6].filter(d=>set.has(d)).map(d=>DAY_ABBR[d]).join(', ') || 'Never';
+}
+function appliesToday(r){ return effectiveDays(r).includes(new Date().getDay()); }
 function renderRoutineColumns(){
   const el = document.getElementById('routineColumns');
   const kids = state.family.filter(m => m.role === 'child');
   if(!kids.length){ el.innerHTML = '<div class="empty-note">Add family members in Settings to see routines here.</div>'; return; }
   el.innerHTML = kids.map(kid => {
-    const items = state.routines.filter(r => routineAppliesToday(r) && (r.assignedTo||[]).includes(kid.id));
+    const items = state.routines.filter(r => appliesToday(r) && (r.assignedTo||[]).includes(kid.id)).sort(byOrder);
     const groups = [['morning','Morning'],['evening','Evening'],['anytime','Anytime']];
     let body = '';
     groups.forEach(([key,label])=>{
@@ -674,7 +705,7 @@ function renderChoreColumns(){
     return;
   }
   el.innerHTML = kids.map(kid => {
-    const items = assigned.filter(c => (Array.isArray(c.assignedTo) ? c.assignedTo : [c.assignedTo].filter(Boolean)).includes(kid.id));
+    const items = assigned.filter(c => (Array.isArray(c.assignedTo) ? c.assignedTo : [c.assignedTo].filter(Boolean)).includes(kid.id)).sort(byOrder);
     if(!items.length) return '';
     const rows = items.map(c => {
       const sharedWith = (Array.isArray(c.assignedTo) ? c.assignedTo : []).filter(id=>id!==kid.id).map(id=>memberById(id)?.name).filter(Boolean);
@@ -697,7 +728,7 @@ function toggleChoreDone(choreId){
 /* ============================== CHORES / POOL / EARNINGS ============================== */
 function renderPool(){
   const el = document.getElementById('poolGrid');
-  const pool = state.chores.filter(c => c.type === 'pool');
+  const pool = state.chores.filter(c => c.type === 'pool').sort(byOrder);
   if(!pool.length){ el.innerHTML = '<div class="empty-note">No pool chores yet — add some in Settings.</div>'; return; }
   const kids = state.family.filter(m=>m.role==='child');
   el.innerHTML = pool.map(c => {
@@ -912,11 +943,7 @@ function renderDayGrid(){
   grid.style.gridTemplateColumns = '1fr';
   grid.style.gridTemplateRows = 'auto';
   const iso = isoOf(dayCursor);
-  const dayEvents = eventsOnDateFiltered(iso).slice().sort((a,b)=>{
-    if(a.allDay && !b.allDay) return -1;
-    if(!a.allDay && b.allDay) return 1;
-    return (a.startTime||'').localeCompare(b.startTime||'');
-  });
+  const dayEvents = eventsOnDateFiltered(iso); // already sorted: computed all-day, real all-day, then timed
   grid.innerHTML = `<div class="day-view" data-date="${iso}">
     ${dayEvents.length ? dayEvents.map(e=>`
       <div class="day-evt" data-event-id="${e.id}" style="border-left-color:${eventBorderColor(e)}">
@@ -955,6 +982,7 @@ function wireIconPicker(inputId){
 
 function openDayModal(iso, editEvent){
   const dayEvents = eventsOnDate(iso);
+  const realAllDayIds = dayEvents.filter(e=>e.allDay && !e.holiday).map(e=>e.id);
   const dateLabel = new Date(iso+'T00:00:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
   const modalRoot = document.getElementById('modalRoot');
   const isEdit = !!editEvent;
@@ -978,10 +1006,18 @@ function openDayModal(iso, editEvent){
                 </span>
                 ${e.notes ? `<br><span style="font-size:12px;color:var(--ink-soft)">📍 ${esc(e.notes)}</span>` : ''}
               </div>
-              ${e.holiday ? '' : `<div class="evt-row-actions">
-                <button class="small-btn" data-edit="${e.id}">Edit</button>
-                <button class="small-btn" data-del="${e.id}">Delete</button>
-              </div>`}
+              ${e.holiday ? '' : (()=>{
+                const allDayIdx = realAllDayIds.indexOf(e.id);
+                const showMove = allDayIdx > -1 && realAllDayIds.length > 1;
+                return `<div class="evt-row-actions">
+                  ${showMove ? `
+                    <button class="small-btn" data-move-dir="up" data-move-id="${e.id}" ${allDayIdx===0?'disabled style="opacity:0.35;"':''}>▲</button>
+                    <button class="small-btn" data-move-dir="down" data-move-id="${e.id}" ${allDayIdx===realAllDayIds.length-1?'disabled style="opacity:0.35;"':''}>▼</button>
+                  ` : ''}
+                  <button class="small-btn" data-edit="${e.id}">Edit</button>
+                  <button class="small-btn" data-del="${e.id}">Delete</button>
+                </div>`;
+              })()}
             </div>
           `).join('') : '<div class="empty-note">Nothing scheduled yet.</div>'}
         </div>
@@ -1070,6 +1106,7 @@ function openDayModal(iso, editEvent){
   document.getElementById('cancelEvtBtn').addEventListener('click', closeModal);
   document.getElementById('backdrop').addEventListener('click', (e)=>{ if(e.target.id==='backdrop') closeModal(); });
   modalRoot.querySelectorAll('[data-del]').forEach(btn=> btn.addEventListener('click', ()=> deleteEvent(btn.dataset.del, iso)));
+  modalRoot.querySelectorAll('[data-move-dir]').forEach(btn=> btn.addEventListener('click', ()=> moveEventOrder(btn.dataset.moveId, iso, btn.dataset.moveDir==='up'?-1:1)));
   modalRoot.querySelectorAll('[data-edit]').forEach(btn=>{
     btn.addEventListener('click', ()=>{ const evt = state.events.find(e=>e.id===btn.dataset.edit); if(evt) openDayModal(iso, evt); });
   });
@@ -1104,6 +1141,7 @@ function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
 
 function saveEvent(evt){
   const localId = uid('local');
+  evt.order = Date.now(); // tie-breaker among same-day all-day events; reorderable via the day-list arrows
   if(evt.workBlock) evt.tag = `FAMILYAPP-${evt.date}-${evt.title.replace(/\s+/g,'').slice(0,20)}-${Date.now()}`;
   state.events.push({ id: localId, ...evt });
   renderAll();
@@ -1119,6 +1157,25 @@ function updateEvent(id, data){
   renderAll();
   if(firebaseReady && !String(id).startsWith('local')) dbWrite(db.collection('events').doc(id).update(data));
   if(data.workBlock) sendWorkBlockEmail(data, 'ADD');
+}
+function moveEventOrder(id, dayIso, direction){
+  // Reorders only among real (non-holiday) all-day events on this specific day. Note: an
+  // event's `order` is a single global field, so reordering a recurring all-day event here
+  // also shifts its tie-break rank on every other day it occurs on — an accepted simplification
+  // rather than building a per-occurrence order override for what's a rare same-day collision.
+  const realAllDay = eventsOnDate(dayIso).filter(e=>e.allDay && !e.holiday);
+  const idx = realAllDay.findIndex(e=>e.id===id);
+  const swapIdx = idx + direction;
+  if(idx<0 || swapIdx<0 || swapIdx>=realAllDay.length) return;
+  const reordered = realAllDay.slice();
+  [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
+  reordered.forEach((evt, i)=>{
+    const stateIdx = state.events.findIndex(x=>x.id===evt.id);
+    if(stateIdx>-1) state.events[stateIdx].order = i;
+    if(firebaseReady && !String(evt.id).startsWith('local')) dbWrite(db.collection('events').doc(evt.id).update({order:i}));
+  });
+  renderAll();
+  openDayModal(dayIso);
 }
 function deleteEvent(id, dayIso){
   const evt = state.events.find(e=>e.id===id);
@@ -1185,11 +1242,14 @@ function openRoutineModal(existing){
       <option value="evening" ${isEdit&&existing.timeOfDay==='evening'?'selected':''}>Evening</option>
       <option value="anytime" ${!isEdit||!existing.timeOfDay||existing.timeOfDay==='anytime'?'selected':''}>Anytime</option>
     </select></div>
-    <div class="field"><label>Which days</label><select id="rtSchedule">
-      <option value="daily" ${!isEdit||existing.schedule==='daily'?'selected':''}>Every day</option>
-      <option value="weekday" ${isEdit&&existing.schedule==='weekday'?'selected':''}>Weekdays only</option>
-      <option value="weekend" ${isEdit&&existing.schedule==='weekend'?'selected':''}>Weekends only</option>
-    </select></div>
+    <div class="field"><label>Which days</label>
+      <div class="day-checkboxes" id="rtDays">
+        ${DAY_ABBR.map((abbr,d)=>{
+          const on = isEdit ? effectiveDays(existing).includes(d) : true;
+          return `<label class="day-checkbox"><input type="checkbox" value="${d}" ${on?'checked':''}>${abbr}</label>`;
+        }).join('')}
+      </div>
+    </div>
     <div class="field"><label>Who</label><div class="assignee-toggles" id="rtAssignees">
       ${kids.map(k=>{ const on = isEdit && (existing.assignedTo||[]).includes(k.id);
         return `<div class="assignee-toggle" data-member="${k.id}" style="--c:${k.color};${on?`background:${k.color};border-color:${k.color};color:white;`:''}">${esc(k.name)}</div>`; }).join('')}
@@ -1215,9 +1275,11 @@ function openRoutineModal(existing){
   document.getElementById('rtSave').addEventListener('click', ()=>{
     const title = document.getElementById('rtTitle').value.trim();
     if(!title){ showToast('Name the routine first.'); return; }
-    const data = { title, icon: document.getElementById('rtIcon').value.trim()||'⭐', schedule: document.getElementById('rtSchedule').value, timeOfDay: document.getElementById('rtTimeOfDay').value, assignedTo: Array.from(selected) };
+    const days = Array.from(modalRoot.querySelectorAll('#rtDays input:checked')).map(i=>parseInt(i.value,10));
+    if(!days.length){ showToast('Pick at least one day.'); return; }
+    const data = { title, icon: document.getElementById('rtIcon').value.trim()||'⭐', days, timeOfDay: document.getElementById('rtTimeOfDay').value, assignedTo: Array.from(selected) };
     if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('routines').doc(existing.id).update(data)); }
-    else { if(firebaseReady) dbWrite(db.collection('routines').add(data)); else state.routines.push({id:uid('local'), ...data}); }
+    else { data.order = state.routines.length; if(firebaseReady) dbWrite(db.collection('routines').add(data)); else state.routines.push({id:uid('local'), ...data}); }
     renderAll(); closeModal();
   });
   if(isEdit) document.getElementById('rtDelete').addEventListener('click', ()=>{ removeDoc('routines', existing.id); closeModal(); });
@@ -1280,7 +1342,7 @@ function openChoreModal(existing){
       data = { title, icon: document.getElementById('chIcon').value.trim()||'🧹', type:'assigned', assignedTo: Array.from(chSelected), status: isEdit&&existing.status?existing.status:'open' };
     }
     if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('chores').doc(existing.id).update(data)); }
-    else { if(firebaseReady) dbWrite(db.collection('chores').add(data)); else state.chores.push({id:uid('local'), ...data}); }
+    else { data.order = state.chores.length; if(firebaseReady) dbWrite(db.collection('chores').add(data)); else state.chores.push({id:uid('local'), ...data}); }
     renderAll(); closeModal();
   });
   if(isEdit) document.getElementById('chDelete').addEventListener('click', ()=>{ removeDoc('chores', existing.id); closeModal(); });
@@ -1311,7 +1373,7 @@ function openRecurringReminderModal(existing){
     if(!text){ showToast('Name the reminder first.'); return; }
     const data = { text, schedule: document.getElementById('rrSchedule').value };
     if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('recurringReminders').doc(existing.id).update(data)); }
-    else { if(firebaseReady) dbWrite(db.collection('recurringReminders').add(data)); else state.recurringReminders.push({id:uid('local'), ...data}); }
+    else { data.order = state.recurringReminders.length; if(firebaseReady) dbWrite(db.collection('recurringReminders').add(data)); else state.recurringReminders.push({id:uid('local'), ...data}); }
     renderAll(); closeModal();
   });
   if(isEdit) document.getElementById('rrDelete').addEventListener('click', ()=>{ removeDoc('recurringReminders', existing.id); closeModal(); });
@@ -1328,40 +1390,48 @@ function renderSettings(){
     </div>`).join('');
   famEl.querySelectorAll('[data-fam-edit]').forEach(btn=> btn.addEventListener('click', ()=> openFamilyModal(memberById(btn.dataset.famEdit))));
 
+  const sortedRoutines = state.routines.slice().sort(byOrder);
   const rEl = document.getElementById('routineList');
-  rEl.innerHTML = state.routines.map(r=>{
+  rEl.innerHTML = sortedRoutines.map(r=>{
     const names = (r.assignedTo||[]).map(id=> memberById(id)?.name).filter(Boolean).join(', ') || 'nobody yet';
-    const scheduleLabel = r.schedule==='weekday'?'Weekdays':r.schedule==='weekend'?'Weekends':'Every day';
     const todLabel = r.timeOfDay==='morning'?'Morning':r.timeOfDay==='evening'?'Evening':'Anytime';
     return `<div class="list-row">
       <span class="item-icon">${esc(r.icon||'⭐')}</span>
-      <div class="grow"><strong>${esc(r.title)}</strong> <span class="status-pill">${todLabel} · ${scheduleLabel} · ${esc(names)}</span></div>
+      <div class="grow"><strong>${esc(r.title)}</strong> <span class="status-pill">${todLabel} · ${daysLabel(effectiveDays(r))} · ${esc(names)}</span></div>
+      ${moveArrowsHtml('routines', sortedRoutines, r.id)}
       <button class="small-btn" data-rt-edit="${r.id}">Edit</button>
     </div>`;
   }).join('');
   rEl.querySelectorAll('[data-rt-edit]').forEach(btn=> btn.addEventListener('click', ()=> openRoutineModal(state.routines.find(x=>x.id===btn.dataset.rtEdit))));
+  wireMoveArrows(rEl, { routines: sortedRoutines });
 
+  const sortedChores = state.chores.slice().sort(byOrder);
   const cEl = document.getElementById('choreList');
-  cEl.innerHTML = state.chores.map(c=>{
+  cEl.innerHTML = sortedChores.map(c=>{
     const assignedNames = (Array.isArray(c.assignedTo) ? c.assignedTo : [c.assignedTo].filter(Boolean)).map(id=>memberById(id)?.name).filter(Boolean).join(', ');
     return `<div class="list-row">
       <span class="item-icon">${esc(c.icon||'🧹')}</span>
       <div class="grow"><strong>${esc(c.title)}</strong> ${c.type==='pool' ? `<span style="color:var(--accent);font-weight:700;">$${(c.value||0).toFixed(2)}</span>`:''}
         <span class="status-pill">${c.type==='pool'?'Up for grabs':'Assigned: '+(assignedNames||'—')}</span></div>
+      ${moveArrowsHtml('chores', sortedChores, c.id)}
       <button class="small-btn" data-ch-edit="${c.id}">Edit</button>
     </div>`;
   }).join('');
   cEl.querySelectorAll('[data-ch-edit]').forEach(btn=> btn.addEventListener('click', ()=> openChoreModal(state.chores.find(x=>x.id===btn.dataset.chEdit))));
+  wireMoveArrows(cEl, { chores: sortedChores });
 
+  const sortedRecurringReminders = state.recurringReminders.slice().sort(byOrder);
   const rrEl = document.getElementById('recurringReminderList');
-  rrEl.innerHTML = state.recurringReminders.map(r=>{
+  rrEl.innerHTML = sortedRecurringReminders.map(r=>{
     const scheduleLabel = r.schedule==='weekday'?'Weekdays':r.schedule==='weekend'?'Weekends':'Every day';
     return `<div class="list-row">
       <div class="grow"><strong>${esc(r.text)}</strong> <span class="status-pill">${scheduleLabel}</span></div>
+      ${moveArrowsHtml('recurringReminders', sortedRecurringReminders, r.id)}
       <button class="small-btn" data-rr-edit="${r.id}">Edit</button>
     </div>`;
   }).join('');
   rrEl.querySelectorAll('[data-rr-edit]').forEach(btn=> btn.addEventListener('click', ()=> openRecurringReminderModal(state.recurringReminders.find(x=>x.id===btn.dataset.rrEdit))));
+  wireMoveArrows(rrEl, { recurringReminders: sortedRecurringReminders });
 
   const anchorInput = document.getElementById('payAnchorInput');
   const typeInput = document.getElementById('payTypeInput');
@@ -1369,6 +1439,34 @@ function renderSettings(){
   if(typeInput && document.activeElement !== typeInput) typeInput.value = state.settings.payPeriodType || 'biweekly';
   const workEmailInput = document.getElementById('workEmailInput');
   if(workEmailInput && document.activeElement !== workEmailInput) workEmailInput.value = state.settings.workEmailTo || '';
+}
+function moveInList(collectionName, sortedList, id, direction){
+  const idx = sortedList.findIndex(x=>x.id===id);
+  const swapIdx = idx + direction;
+  if(idx<0 || swapIdx<0 || swapIdx>=sortedList.length) return;
+  const reordered = sortedList.slice();
+  [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
+  reordered.forEach((item, i)=>{
+    const stateIdx = state[collectionName].findIndex(x=>x.id===item.id);
+    if(stateIdx>-1) state[collectionName][stateIdx].order = i;
+    if(firebaseReady && !String(item.id).startsWith('local')) dbWrite(db.collection(collectionName).doc(item.id).update({order:i}));
+  });
+  renderAll();
+}
+function byOrder(a,b){ return (a.order||0) - (b.order||0); }
+function moveArrowsHtml(collectionName, sortedList, id){
+  const idx = sortedList.findIndex(x=>x.id===id);
+  if(sortedList.length < 2) return '';
+  return `<button class="small-btn" data-move-list="${collectionName}" data-move-dir="up" data-move-id="${id}" ${idx===0?'disabled style="opacity:0.35;"':''}>▲</button>
+    <button class="small-btn" data-move-list="${collectionName}" data-move-dir="down" data-move-id="${id}" ${idx===sortedList.length-1?'disabled style="opacity:0.35;"':''}>▼</button>`;
+}
+function wireMoveArrows(container, listsById){
+  container.querySelectorAll('[data-move-list]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const collectionName = btn.dataset.moveList;
+      moveInList(collectionName, listsById[collectionName], btn.dataset.moveId, btn.dataset.moveDir==='up'?-1:1);
+    });
+  });
 }
 function removeDoc(collection, id){
   state[collection] = state[collection].filter(x=>x.id!==id);
