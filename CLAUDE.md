@@ -83,10 +83,27 @@ thing you can do first — it will likely surface real bugs that were never actu
 - iOS "Smart Punctuation" converts straight quotes to curly quotes on paste, which breaks the
   Firestore rules parser. Not a code bug, but worth knowing if the user reports rules errors
   again.
+- `todayISO()`/`isoOf()` used `.toISOString()`, which is always UTC — for any timezone behind
+  UTC (all of the US), that rolls over to the next calendar date several hours *before* local
+  midnight (e.g. ~5pm Pacific already reads as "tomorrow" in UTC). Everything keyed by "today"
+  was silently affected: an evening routine/chore checked off after that point got logged under
+  tomorrow's date, so it was still showing as done first thing the next morning instead of
+  resetting. `localIsoOf()` already did this correctly (built for mapping precise UTC instants
+  like equinox times to the right local calendar day, see below) but that fix was never applied
+  to `isoOf()`/`todayISO()` themselves — they now go through the same local-date math. If a
+  "today" bug is ever reported again, check whether it's this class of issue before assuming
+  it's something new: search for any stray `.toISOString()` reintroduced outside `localIsoOf()`.
 
 ## Data model (Firestore collections)
 
-- `family`: `{name, role: 'parent'|'child', color, order}`
+- `family`: `{name, role: 'parent'|'child', color, textColor, order}`. `textColor` is the text
+  color used on that person's calendar event pills (Month/Week views, where the pill background
+  is their `color`) — a hex string, defaulting to white (`#FFFFFF`) via `textColorOf()`'s fallback
+  when unset (legacy members, or any doc saved before this field existed), same fallback-on-read
+  pattern as everywhere else in this app rather than a migration. Chosen via a native color input
+  plus a row of white/black/gray-variant preset swatches (`colorFieldHtml()`/`wireColorField()`,
+  a small reusable component also used for the "everyone" text color below), since white-on-white
+  or white-on-a-light-color background pills were unreadable before this existed.
 - `routines`: `{title, icon, timeOfDay: 'morning'|'evening'|'anytime', assignedTo: [memberId],
   perMemberDays: {memberId: [0-6]} (Sun=0..Sat=6), order}`. `assignedTo` is no longer kids-only —
   routines can be assigned to parents too (e.g. a "take vitamins" routine), and a member with at
@@ -134,12 +151,14 @@ thing you can do first — it will likely surface real bugs that were never actu
   already isn't a daily thing.
 - `earnings`: `{memberId, amount, title, date, paid}` — one row per completed pool chore
 - `events`: `{title, date, endDate, allDay, startTime, endTime, recurrence:
-  'none'|'daily'|'weekly'|'biweekly'|'monthly-date'|'monthly-weekday'|'yearly', assignees:
+  'none'|'weekly'|'monthly-date'|'monthly-weekday'|'yearly', weeklyDays, weeklyInterval, assignees:
   [memberId] (empty or all-members = "applies to everyone", shown in a distinct dark color; 2+
   members but not everyone shows as an equal-width multi-color gradient split, one band per
   assignee), notes, birthYear, workBlock, tag, order}` — `tag` is used to correlate with the
-  Outlook block via Power Automate. `notes` is free text (location, details) shown in the day
-  list and Day view. `birthYear` only applies when `recurrence==='yearly'`; when set, the display
+  Outlook block via Power Automate. `notes` is free text (location, details) shown in the
+  day-list modal (tap a day, or tap an event) — not inline on the calendar pill itself in any of
+  Month/Week/Day, same as the title-only pills everywhere else. `birthYear` only applies when
+  `recurrence==='yearly'`; when set, the display
   title gets a computed `(turning N)` suffix (`N` = the displayed occurrence's year minus
   `birthYear`) — never stored on the title itself, so it stays correct every year with no upkeep.
   `order` (set to `Date.now()` at creation) is a tie-breaker among same-day all-day events only —
@@ -148,6 +167,45 @@ thing you can do first — it will likely surface real bugs that were never actu
   same-day tie-break rank shifts it on every day it occurs, not just the one you reordered it
   from — an accepted simplification rather than a per-occurrence order override, since same-day
   all-day collisions on a recurring event are a rare edge case.
+
+  **Weekly recurrence** (`recurrence==='weekly'`) carries an explicit `weeklyDays: [0-6]` +
+  `weeklyInterval: N` — an event can repeat on more than one day per week (e.g. practice every
+  Mon+Thu) and/or every N weeks instead of every week, mirroring the Outlook-style recurrence
+  picker rather than the old fixed daily/weekly/biweekly options. This replaced the separate
+  `'daily'`/`'biweekly'` recurrence values (each of which could only repeat on a single fixed
+  day); those old values are read through the same legacy-fallback pattern as routines/chores
+  (`eventWeeklyDays()`/`eventWeeklyInterval()`, never migrated) rather than a batch migration —
+  `'daily'` becomes "every day of the week, every week," a `'weekly'` or `'biweekly'` doc with no
+  `weeklyDays` becomes "just its own day-of-week, every 1 or 2 weeks." The interval is counted in
+  whole calendar weeks (Sun-anchored) from the event's own start date, not in raw day counts, so
+  a multi-day pattern (Mon+Thu) skips the *same* in-between week for every selected day, matching
+  how Outlook's own "every N weeks" picker behaves.
+
+- `eventExceptions`: doc id `${eventId}_${originalDate}` → `{eventId, date, deleted}` or
+  `{eventId, date, deleted:false, overrides:{...any event fields...}}` — same
+  composite-string-is-the-doc-id convention as `routineLog`/`choreLog`/`recurringReminderLog`, so
+  saving is always a plain upsert with no need to check whether a doc already exists first, just
+  storing a richer override object instead of a boolean. Backs **editing or deleting a single
+  occurrence vs. the whole series**: tapping a recurring event (a pill in Month/Week/Day view, or
+  Edit/Delete in the day-list modal) opens `openRecurrenceScopeModal()` first — "this date" vs
+  "the whole series" — before anything else happens; a non-recurring event skips straight to its
+  own edit form as before, since there's only one occurrence to talk about. "The whole series"
+  behaves exactly like editing/deleting always did (writes/removes the base `events` doc). "This
+  date" instead reads/writes one `eventExceptions` doc: `deleted:true` skips that occurrence
+  entirely; `overrides` holds this occurrence's title, date/time, notes, assignees, and/or
+  work-block flag where they differ from the series — including moving it to a different date,
+  e.g. "this week's practice is on Wednesday instead." `eventsOnDate()` layers these on top of the
+  normal recurrence math: for a date the event would normally occur on, an active exception
+  suppresses it (deleted) or substitutes its overridden fields in place; separately, every event's
+  exceptions are also scanned for one whose *overridden* date lands on the date being rendered, so
+  a moved occurrence shows up on its new date instead of its original slot. `occurrenceDate` is
+  stamped onto every rendered occurrence (the original, un-moved slot date — i.e. the exception
+  key) specifically so editing/deleting an already-moved occurrence again still finds the right
+  exception doc regardless of which date it's currently displayed on. Deleting the whole series
+  also deletes its exception docs, so they don't linger as orphans. Occurrence-level edits
+  deliberately omit `recurrence`/`weeklyDays`/`weeklyInterval`/`endDate`/`birthYear` from what can
+  be overridden — those describe the *series*, not one date, so the edit form hides the Repeats
+  section entirely when editing just one occurrence.
 - `reminders`: `{text, done, order}` — one-off, manually added/removed from the Reminders tab,
   done state persists until deleted.
 - `recurringReminders`: `{text, schedule: 'daily'|'weekday'|'weekend', order}` — configured in
@@ -157,8 +215,17 @@ thing you can do first — it will likely surface real bugs that were never actu
 - `recurringReminderLog`: doc id `${date}_${reminderId}` → `{date, reminderId, done}` — same
   per-day-reset pattern as `routineLog`, just without a `memberId` since reminders aren't
   per-person.
-- `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly',
-  workEmailTo}`
+- `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly', workEmailTo,
+  everyoneColor, everyoneTextColor}`. `everyoneColor`/`everyoneTextColor` (hex strings, default
+  `#3A362C`/`#FFFFFF`, same fallback-on-read pattern as the rest of `settings/main`) are the
+  background/text color for "everyone" events — anything with no assignees or assigned to the
+  whole family, including the computed holidays/seasons/DST entries (they're synthesized as
+  zero-assignee events, so they pick this up automatically with no extra code) and the "Everyone"
+  chip in the calendar's person filter. Previously this was a hardcoded, non-editable
+  `--everyone` CSS custom property; it's now still a CSS var (`--everyone` / `--everyone-text`,
+  every existing `var(--everyone)` usage kept working unchanged) but `applyEveryoneColorVars()`
+  re-syncs both from `state.settings` on every `renderAll()`, so a Settings save takes effect
+  everywhere the var is used without hunting down each call site individually.
 
 **Manual reordering.** Routines, chores, and recurring reminders each show ▲/▼ arrows in their
 Settings list (disabled at the ends of the list); manual one-off reminders show the same arrows
@@ -190,14 +257,30 @@ once already (see the Home Screen chrome saga above).
 Recurrence + multi-day (`endDate`) are mutually exclusive in the current implementation —
 recurring events are treated as single-day only. This is a known simplification, not a bug.
 
+**Week and Day views are an Outlook-style time grid, not a list.** `renderTimeGrid(dates)` is the
+single shared implementation behind both — `renderWeekGrid()` passes 7 dates, `renderDayGrid()`
+passes 1 — so Day view is really just a 1-column week. An all-day row is pinned above a shared
+scrollable hour grid (`TIME_GRID_HOUR_HEIGHT = 48`px/hour, 24h = 1152px tall); timed events are
+absolutely positioned by actual start/end time (`timedEventGeometry()`, with a 30-minute floor on
+*visual* height only — never touches the stored `startTime`/`endTime`) rather than just listed in
+order. Overlapping timed events are packed into side-by-side columns by `packTimedEvents()` — a
+standard interval-packing sweep (sort by start time, reuse a column once its previous occupant
+has ended, open a new one otherwise, grouped into clusters of mutually-touching events so an
+unrelated event later in the day isn't forced to share column width with an earlier cluster).
+Today's column gets a `.now-line` current-time indicator; the grid's default scroll position is
+"now minus 2 hours" if today is in view, else 7 AM, so opening the view doesn't dump you at
+midnight. Month view is untouched by any of this — it stays the compact multi-week grid it always
+was, matching how Outlook's own Month view also doesn't show a time grid.
+
 ## Design language (established, keep consistent)
 
 Paper-calendar aesthetic, not a SaaS dashboard — established deliberately per a design brief
 requiring distinctive, non-templated choices. Warm cream/paper background (`#F6F1E4`), dark ink
 text (`#2C2A24`), Fraunces serif for headings/date numbers, system sans for everything else
 (no custom body webfont — performance on old iPad hardware). Family member colors are the only
-real accent colors in the UI; a fixed dark neutral (`--everyone: #3A362C`) marks events that
-apply to everyone. Bottom navigation (not top) — there is no top header/branding bar at all
+real accent colors in the UI; a dark neutral by default (`--everyone`, editable in Settings, see
+`everyoneColor`/`everyoneTextColor` above) marks events that apply to everyone. Bottom navigation
+(not top) — there is no top header/branding bar at all
 (removed deliberately to reclaim vertical space on the iPad); the on-screen headline is the
 current month/week/day. The "Sign out" control lives at the bottom of the Settings tab instead
 of a header, since there's nowhere else on-screen it belongs.
@@ -227,7 +310,6 @@ etc.) is intentional and should stay generic.
 - Real drag-and-drop event rescheduling (deferred — see above)
 - External calendar import/subscription (deferred — see above)
 - True update flow for work-calendar Outlook blocks (currently remove-then-add)
-- Editing a single occurrence of a recurring event (currently edits/deletes the whole series)
 
 ## Files
 

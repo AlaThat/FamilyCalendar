@@ -19,7 +19,7 @@
 <style>
   :root{
     --paper: #F6F1E4; --paper-line: #E4DBC4; --ink: #2C2A24; --ink-soft: #6B6656;
-    --accent: #B5542C; --white: #FFFDF8; --radius: 10px; --everyone: #3A362C;
+    --accent: #B5542C; --white: #FFFDF8; --radius: 10px; --everyone: #3A362C; --everyone-text: #FFFFFF;
   }
   *{ box-sizing: border-box; }
   html,body{ margin:0; padding:0; height:100%; background: var(--paper); color: var(--ink);
@@ -90,17 +90,29 @@
   .cal-evt{ font-size:11px; padding:2px 5px; border-radius:5px; color:white; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cal-evt.allday{ border:1px dashed rgba(255,255,255,0.7); }
 
-  .week-col{ background:var(--white); border:1px solid var(--paper-line); border-radius:8px; padding:8px; min-height:220px; height:100%; min-width:0; overflow-x:hidden; overflow-y:auto; cursor:pointer; }
-  .week-col.today{ border-color:var(--accent); border-width:2px; }
-  .week-col-head{ font-weight:700; font-size:12px; text-align:center; margin-bottom:8px; color:var(--ink-soft); }
-  .week-col-head .cal-date-num{ display:block; font-size:18px; color:var(--ink); }
-  .week-evt{ font-size:11px; color:white; padding:4px 6px; border-radius:6px; margin-bottom:4px; line-height:1.3; }
-
-  .day-view{ display:flex; flex-direction:column; gap:10px; }
-  .day-evt{ background:var(--white); border:1px solid var(--paper-line); border-left:6px solid var(--ink-soft); border-radius:8px; padding:12px 14px; cursor:pointer; }
-  .day-evt-time{ font-size:12px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.03em; margin-top:4px; }
-  .day-evt-title{ font-size:17px; font-weight:600; }
-  .day-evt-notes{ font-size:13px; color:var(--ink-soft); margin-top:4px; }
+  /* Outlook-style time grid, shared by Week (7 columns) and Day (1 column) views — see
+     renderTimeGrid(). All-day events pin to a row on top; timed events are absolutely
+     positioned within a shared scrollable hour grid so their vertical position reflects when
+     they actually land in the day, with overlapping events packed side by side. */
+  .time-grid-wrap{ display:flex; flex-direction:column; flex:1; min-height:0; }
+  .allday-row{ display:flex; border-bottom:1px solid var(--paper-line); padding-bottom:4px; margin-bottom:2px; flex-shrink:0; }
+  .hour-axis-spacer{ width:52px; flex-shrink:0; }
+  .allday-col{ flex:1; min-width:0; padding:2px 4px; cursor:pointer; display:flex; flex-direction:column; gap:3px; border-left:1px solid var(--paper-line); }
+  .week-day-head{ font-weight:700; font-size:12px; text-align:center; color:var(--ink-soft); margin-bottom:2px; }
+  .week-day-head.today{ color:var(--accent); }
+  .week-day-head .cal-date-num{ display:block; font-size:16px; color:var(--ink); }
+  .allday-pill{ font-size:11px; padding:3px 6px; border-radius:5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
+  .time-grid-scroll{ flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; position:relative; }
+  .time-grid-inner{ display:flex; position:relative; }
+  .hour-axis{ width:52px; flex-shrink:0; position:relative; }
+  .hour-label{ position:absolute; right:8px; transform:translateY(-50%); font-size:11px; color:var(--ink-soft); white-space:nowrap; }
+  .time-col{ flex:1; min-width:0; position:relative; border-left:1px solid var(--paper-line); cursor:pointer; }
+  .hour-line{ position:absolute; left:0; right:0; border-top:1px solid var(--paper-line); }
+  .time-evt{ position:absolute; border-radius:6px; padding:2px 6px; font-size:11px; line-height:1.25; overflow:hidden; cursor:pointer; box-shadow:0 1px 2px rgba(44,42,36,0.15); box-sizing:border-box; }
+  .time-evt-title{ font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .time-evt-time{ font-size:10px; opacity:0.9; }
+  .now-line{ position:absolute; left:0; right:0; height:2px; background:var(--accent); z-index:3; pointer-events:none; }
+  .now-line::before{ content:''; position:absolute; left:-4px; top:-3px; width:8px; height:8px; border-radius:50%; background:var(--accent); }
 
   .modal-backdrop{ position:fixed; inset:0; background:rgba(44,42,36,0.45); display:flex; align-items:center; justify-content:center; z-index:50; padding:20px; }
   .modal{ background: var(--white); border-radius: 14px; padding:22px; width:100%; max-width:460px; max-height:88vh; overflow-y:auto; }
@@ -124,6 +136,9 @@
   .icon-grid{ display:grid; grid-template-columns: repeat(8, 1fr); gap:6px; margin-bottom:8px; }
   .icon-opt{ font-size:20px; text-align:center; padding:6px 0; border-radius:8px; border:2px solid transparent; cursor:pointer; background:var(--paper); }
   .icon-opt.on{ border-color: var(--accent); background:#FCEFE4; }
+  .swatch-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .swatch-opt{ width:26px; height:26px; border-radius:50%; border:2px solid var(--paper-line); cursor:pointer; }
+  .swatch-opt.on{ border-color:var(--ink); box-shadow:0 0 0 2px var(--white), 0 0 0 4px var(--ink); }
   .modal-actions{ display:flex; gap:10px; margin-top:18px; flex-wrap:wrap; }
   .btn{ border:none; border-radius:8px; padding:11px 18px; font-weight:700; cursor:pointer; font-size:15px; font-family:inherit; }
   .btn-primary{ background: var(--ink); color:white; }
@@ -209,6 +224,13 @@
         <div class="section-title">Family members</div>
         <div id="familyList"></div>
         <button class="add-row-btn" id="addFamilyBtn">+ Add family member</button>
+      </div>
+      <div class="settings-block">
+        <div class="section-title">"Everyone" event color</div>
+        <p class="section-sub">Used for events with no one assigned, or assigned to the whole family — on the calendar and the person filter.</p>
+        <div class="field"><label>Background color</label><input type="color" id="everyoneColorInput"></div>
+        <div class="field"><label>Text color</label><div id="everyoneTextColorField"></div></div>
+        <button class="btn btn-primary" id="saveEveryoneColorBtn">Save</button>
       </div>
       <div class="settings-block">
         <div class="section-title">Daily routines</div>
@@ -309,15 +331,50 @@ if(firebaseReady){
 
 /* ---------------- State ---------------- */
 const state = {
-  family: [], routines: [], routineLog: {}, chores: [], choreLog: {}, earnings: [], events: [], reminders: [],
+  family: [], routines: [], routineLog: {}, chores: [], choreLog: {}, earnings: [], events: [], eventExceptions: {}, reminders: [],
   recurringReminders: [], recurringReminderLog: {},
-  settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '' }
+  settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '', everyoneColor: '#3A362C', everyoneTextColor: '#FFFFFF' }
 };
-const todayISO = () => new Date().toISOString().slice(0,10);
-const isoOf = d => d.toISOString().slice(0,10);
+/* Local calendar date, not UTC — .toISOString() rolls over to the next date up to several hours
+   before local midnight for any timezone behind UTC (e.g. ~5pm Pacific already reads as
+   "tomorrow" in UTC), which was silently mis-dating everything keyed by "today": an evening
+   routine/chore checked off after that point got logged under tomorrow's date, so it was still
+   showing as done first thing the next morning instead of resetting. localIsoOf() already did
+   this correctly (built for mapping precise UTC instants like equinox times to the right local
+   calendar day) — isoOf()/todayISO() now go through the same local-date math. */
+const todayISO = () => isoOf(new Date());
+const isoOf = d => localIsoOf(d);
 const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function memberById(id){ return state.family.find(m => m.id === id); }
 function colorOf(id){ const m = memberById(id); return m ? m.color : '#999'; }
+const TEXT_COLOR_PRESETS = ['#FFFFFF','#000000','#333333','#777777','#CCCCCC'];
+function textColorOf(id){ const m = memberById(id); return (m && m.textColor) || '#FFFFFF'; }
+function applyEveryoneColorVars(){
+  document.documentElement.style.setProperty('--everyone', state.settings.everyoneColor || '#3A362C');
+  document.documentElement.style.setProperty('--everyone-text', state.settings.everyoneTextColor || '#FFFFFF');
+}
+function colorFieldHtml(inputId, currentHex, presets){
+  return `<div class="swatch-row">
+    <input type="color" id="${inputId}" value="${currentHex}" style="width:44px;height:36px;padding:0;border:1px solid var(--paper-line);border-radius:6px;">
+    <div class="swatch-row" id="${inputId}_presets">
+      ${presets.map(hex=>`<div class="swatch-opt ${hex.toLowerCase()===currentHex.toLowerCase()?'on':''}" data-hex="${hex}" style="background:${hex};" title="${hex}"></div>`).join('')}
+    </div>
+  </div>`;
+}
+function wireColorField(inputId){
+  const input = document.getElementById(inputId);
+  const row = document.getElementById(inputId+'_presets');
+  row.querySelectorAll('.swatch-opt').forEach(sw=>{
+    sw.addEventListener('click', ()=>{
+      input.value = sw.dataset.hex;
+      row.querySelectorAll('.swatch-opt').forEach(s=>s.classList.remove('on'));
+      sw.classList.add('on');
+    });
+  });
+  input.addEventListener('input', ()=>{
+    row.querySelectorAll('.swatch-opt').forEach(s=> s.classList.toggle('on', s.dataset.hex.toLowerCase()===input.value.toLowerCase()));
+  });
+}
 function uid(prefix){ return prefix + Date.now() + Math.floor(Math.random()*1000); }
 function esc(str){
   return String(str==null?'':str).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -352,6 +409,11 @@ function initFirestoreListeners(){
   watchCollection('routines', rows => { state.routines = rows; renderAll(); });
   watchCollection('chores', rows => { state.chores = rows; renderAll(); });
   watchCollection('events', rows => { state.events = rows; renderAll(); });
+  watchCollection('eventExceptions', rows => {
+    state.eventExceptions = {};
+    rows.forEach(r => state.eventExceptions[`${r.eventId}_${r.date}`] = r);
+    renderAll();
+  });
   watchCollection('earnings', rows => { state.earnings = rows; renderAll(); });
   watchCollection('reminders', rows => { state.reminders = rows; renderAll(); });
   watchCollection('recurringReminders', rows => { state.recurringReminders = rows; renderAll(); });
@@ -371,7 +433,7 @@ function initFirestoreListeners(){
     renderAll();
   });
   db.collection('settings').doc('main').onSnapshot(doc=>{
-    if(doc.exists) state.settings = Object.assign({payPeriodAnchor:null,payPeriodType:'biweekly',workEmailTo:''}, doc.data());
+    if(doc.exists) state.settings = Object.assign({payPeriodAnchor:null,payPeriodType:'biweekly',workEmailTo:'',everyoneColor:'#3A362C',everyoneTextColor:'#FFFFFF'}, doc.data());
     renderAll();
   });
 }
@@ -395,6 +457,22 @@ if(!firebaseReady){
 
 /* ============================== RECURRENCE / DATE MATCHING ============================== */
 function daysInMonthOf(d){ return new Date(d.getFullYear(), d.getMonth()+1, 0).getDate(); }
+/* A weekly-recurring event carries an explicit day-of-week set + repeat interval
+   (weeklyDays/weeklyInterval) so a single event can repeat on more than one day per week
+   (e.g. practice every Mon+Thu) and/or every N weeks instead of every week — this replaced the
+   old separate daily/weekly/biweekly recurrence values, which only supported a single fixed day.
+   Those old values are read through this same fallback (not migrated) exactly like the
+   routines/chores legacy-shape pattern: 'daily' -> every day of the week, every week; a 'weekly'
+   or 'biweekly' doc saved before this existed -> just its own day-of-week, every 1 or 2 weeks. */
+function eventWeeklyDays(evt){
+  if(Array.isArray(evt.weeklyDays) && evt.weeklyDays.length) return evt.weeklyDays;
+  if(evt.recurrence === 'daily') return [0,1,2,3,4,5,6];
+  return [new Date(evt.date+'T00:00:00').getDay()];
+}
+function eventWeeklyInterval(evt){
+  if(evt.weeklyInterval && evt.weeklyInterval > 0) return evt.weeklyInterval;
+  return evt.recurrence === 'biweekly' ? 2 : 1;
+}
 function eventOccursOnDate(evt, dateISO){
   const d = new Date(dateISO+'T00:00:00');
   const startD = new Date(evt.date+'T00:00:00');
@@ -404,9 +482,16 @@ function eventOccursOnDate(evt, dateISO){
     return d >= startD && d <= endD;
   }
   if(d < startD) return false;
-  if(rec === 'daily') return true;
-  if(rec === 'weekly'){ return Math.round((d-startD)/86400000) % 7 === 0; }
-  if(rec === 'biweekly'){ return Math.round((d-startD)/86400000) % 14 === 0; }
+  if(rec === 'daily' || rec === 'weekly' || rec === 'biweekly'){
+    const days = eventWeeklyDays(evt);
+    if(!days.includes(d.getDay())) return false;
+    const interval = eventWeeklyInterval(evt);
+    if(interval <= 1) return true;
+    const startWeekStart = new Date(startD); startWeekStart.setDate(startD.getDate() - startD.getDay());
+    const dWeekStart = new Date(d); dWeekStart.setDate(d.getDate() - d.getDay());
+    const weeksDiff = Math.round((dWeekStart - startWeekStart) / (7*86400000));
+    return weeksDiff % interval === 0;
+  }
   if(rec === 'monthly-date'){ return d.getDate() === startD.getDate(); }
   if(rec === 'monthly-weekday'){
     if(d.getDay() !== startD.getDay()) return false;
@@ -556,7 +641,43 @@ function sortEventsForDisplay(events){
     return 0; // computed entries: stable insertion order
   });
 }
-function eventsOnDate(dateISO){ return sortEventsForDisplay(state.events.filter(e => eventOccursOnDate(e, dateISO)).concat(computedEventsOnDate(dateISO))); }
+function getEventException(eventId, dateISO){ return state.eventExceptions[`${eventId}_${dateISO}`]; }
+/* Recurring events can have per-occurrence exceptions (see openRecurrenceScopeModal) — an
+   occurrence can be individually edited (title/time/date/assignees/etc. overridden for just that
+   date) or deleted, without touching the rest of the series. This mirrors the routineLog/choreLog
+   per-day-state pattern but stores a richer override object instead of a boolean, keyed the same
+   way (eventId + the occurrence's ORIGINAL scheduled date, not wherever it may have been moved
+   to). Every rendered occurrence carries `occurrenceDate` (that original date, i.e. the exception
+   key) and keeps `id` as the base event's id, so editing/deleting it can always find its way back
+   to the right exception doc regardless of which date it's currently displayed on. */
+function eventsOnDate(dateISO){
+  const real = [];
+  for(const e of state.events){
+    if(!e.recurrence || e.recurrence === 'none'){
+      if(eventOccursOnDate(e, dateISO)) real.push(Object.assign({}, e, { occurrenceDate: e.date }));
+      continue;
+    }
+    if(eventOccursOnDate(e, dateISO)){
+      const ex = getEventException(e.id, dateISO);
+      if(ex && ex.deleted){
+        // this occurrence was individually deleted - suppressed
+      } else if(ex && ex.overrides && ex.overrides.date && ex.overrides.date !== dateISO){
+        // this occurrence was individually moved to a different date - shown there instead (below)
+      } else if(ex && ex.overrides){
+        real.push(Object.assign({}, e, ex.overrides, { id: e.id, occurrenceDate: dateISO }));
+      } else {
+        real.push(Object.assign({}, e, { occurrenceDate: dateISO }));
+      }
+    }
+    for(const key in state.eventExceptions){
+      const ex = state.eventExceptions[key];
+      if(ex.eventId === e.id && !ex.deleted && ex.overrides && ex.overrides.date === dateISO && ex.date !== dateISO){
+        real.push(Object.assign({}, e, ex.overrides, { id: e.id, occurrenceDate: ex.date }));
+      }
+    }
+  }
+  return sortEventsForDisplay(real.concat(computedEventsOnDate(dateISO)));
+}
 function defaultEventTime(){ const d = new Date(); return String(d.getHours()).padStart(2,'0')+':00'; }
 function formatTime12(hhmm){
   if(!hhmm) return '';
@@ -586,13 +707,18 @@ function eventColor(e){
   const stops = colors.map((c,i)=> `${c} ${(i*step).toFixed(2)}%, ${c} ${((i+1)*step).toFixed(2)}%`).join(', ');
   return `linear-gradient(90deg, ${stops})`;
 }
-function eventBorderColor(e){ return isEveryoneEvent(e) ? 'var(--everyone)' : colorOf((e.assignees||[])[0]); }
+function eventTextColor(e){ return isEveryoneEvent(e) ? 'var(--everyone-text)' : textColorOf((e.assignees||[])[0]); }
 let calPersonFilter = null;
 function passesPersonFilter(e){ if(!calPersonFilter) return true; return isEveryoneEvent(e) || (e.assignees||[]).includes(calPersonFilter); }
 function eventsOnDateFiltered(dateISO){ return eventsOnDate(dateISO).filter(passesPersonFilter); }
-function recurrenceLabel(rec){
-  return { daily:'repeats daily', weekly:'repeats weekly', biweekly:'repeats every 2 weeks',
-    'monthly-date':'repeats monthly', 'monthly-weekday':'repeats monthly', yearly:'repeats yearly' }[rec] || '';
+function recurrenceLabel(evt){
+  const rec = evt.recurrence;
+  if(rec === 'daily' || rec === 'weekly' || rec === 'biweekly'){
+    const dayPart = daysLabel(eventWeeklyDays(evt)).toLowerCase();
+    const interval = eventWeeklyInterval(evt);
+    return interval > 1 ? `repeats ${dayPart} every ${interval} weeks` : `repeats ${dayPart}`;
+  }
+  return { 'monthly-date':'repeats monthly', 'monthly-weekday':'repeats monthly', yearly:'repeats yearly' }[rec] || '';
 }
 
 /* ============================== TODAY TAB ============================== */
@@ -928,6 +1054,19 @@ document.getElementById('calNext').addEventListener('click', ()=>{
 document.getElementById('calAddBtn').addEventListener('click', ()=> openDayModal(calViewMode==='day' ? isoOf(dayCursor) : todayISO()));
 
 function findEventById(id){ return state.events.find(x=>x.id===id); }
+/* Shared entry point for every "tap an event to edit it" spot (Month/Week/Day view pills, and
+   the day-list modal's Edit button) — looks the event up through eventsOnDate() rather than
+   findEventById() so occurrence overrides are already applied, then routes recurring events
+   through the this-date-vs-whole-series choice before anything opens the edit form. */
+function openEventForEdit(eventId, dateISO){
+  // Computed holiday/season/DST entries share this lookup but are never editable (see
+  // computedEventsOnDate) — excluding them here, same as findEventById always did implicitly by
+  // only searching state.events, so tapping one still falls through to the blank add-event form.
+  const evt = eventId ? eventsOnDate(dateISO).find(e=>e.id===eventId && !e.holiday) : null;
+  if(!evt){ openDayModal(dateISO); return; }
+  if(evt.recurrence && evt.recurrence!=='none') openRecurrenceScopeModal(evt, dateISO, 'edit');
+  else openDayModal(dateISO, evt);
+}
 
 function renderMonthGrid(){
   const grid = document.getElementById('calGrid');
@@ -947,7 +1086,7 @@ function renderMonthGrid(){
     const iso = isoOf(cellDate);
     const isToday = iso === todayISO();
     const dayEvents = eventsOnDateFiltered(iso);
-    const evtHtml = dayEvents.slice(0,3).map(e=> `<div class="cal-evt ${e.allDay?'allday':''}" data-event-id="${e.id}" style="background:${eventColor(e)}">${esc(displayEventTitle(e, iso))}${!e.allDay&&e.startTime?` <strong>${esc(formatTime12(e.startTime))}</strong>`:''}</div>`).join('');
+    const evtHtml = dayEvents.slice(0,3).map(e=> `<div class="cal-evt ${e.allDay?'allday':''}" data-event-id="${e.id}" style="background:${eventColor(e)};color:${eventTextColor(e)}">${esc(displayEventTitle(e, iso))}${!e.allDay&&e.startTime?` <strong>${esc(formatTime12(e.startTime))}</strong>`:''}</div>`).join('');
     cells += `<div class="cal-cell ${monthOffset!==0?'other-month':''} ${isToday?'today':''}" data-date="${iso}">
       <div class="cal-date-num">${dayNum}${moonBadge(iso)}</div>${evtHtml}
       ${dayEvents.length>3?`<div style="font-size:11px;color:var(--ink-soft)">+${dayEvents.length-3} more</div>`:''}
@@ -956,53 +1095,127 @@ function renderMonthGrid(){
   grid.innerHTML = cells;
   grid.querySelectorAll('.cal-cell').forEach(cell=> cell.addEventListener('click', (ev)=>{
     const pill = ev.target.closest('.cal-evt');
-    const evt = pill && findEventById(pill.dataset.eventId);
-    if(evt) openDayModal(cell.dataset.date, evt); else openDayModal(cell.dataset.date);
+    openEventForEdit(pill && pill.dataset.eventId, cell.dataset.date);
   }));
 }
-function renderWeekGrid(){
-  const grid = document.getElementById('calGrid');
-  grid.style.gridTemplateColumns = 'repeat(7, minmax(0,1fr))';
-  grid.style.gridTemplateRows = '1fr';
-  const start = startOfWeek(weekCursor);
+const TIME_GRID_HOUR_HEIGHT = 48; // px per hour in the Week/Day time grid (24h tall = 1152px, scrolls)
+function timeToMinutes(hhmm){ if(!hhmm) return 0; const [h,m] = hhmm.split(':').map(Number); return h*60+(m||0); }
+function hourLabel12(h){ const period = h>=12?'PM':'AM'; let hh=h%12; if(hh===0) hh=12; return `${hh} ${period}`; }
+function timedEventGeometry(e){
+  const MIN_DURATION = 30; // minutes — a floor on visual height only, never touches stored data
+  const startMin = timeToMinutes(e.startTime);
+  let endMin = timeToMinutes(e.endTime);
+  if(!e.endTime || endMin <= startMin) endMin = startMin + 60;
+  if(endMin - startMin < MIN_DURATION) endMin = startMin + MIN_DURATION;
+  return { startMin, endMin: Math.min(endMin, 24*60) };
+}
+/* Side-by-side layout for overlapping timed events (a standard interval-packing sweep): walk
+   events by start time, reuse a column once its previous occupant has ended, open a new column
+   otherwise. Events are grouped into clusters (runs of mutually-touching events) so unrelated
+   events later in the day aren't forced to share the same column width. */
+function packTimedEvents(evts){
+  const sorted = evts.slice().sort((a,b)=> a.startMin-b.startMin || a.endMin-b.endMin);
+  let clusterEvents = [], clusterEnd = -Infinity, columnEnds = [];
+  const flush = ()=>{ clusterEvents.forEach(e=> e.totalCols = columnEnds.length); clusterEvents = []; columnEnds = []; };
+  sorted.forEach(e=>{
+    if(e.startMin >= clusterEnd){ flush(); clusterEnd = -Infinity; }
+    let col = columnEnds.findIndex(end => end <= e.startMin);
+    if(col === -1){ col = columnEnds.length; columnEnds.push(e.endMin); } else columnEnds[col] = e.endMin;
+    e.col = col;
+    clusterEnd = Math.max(clusterEnd, e.endMin);
+    clusterEvents.push(e);
+  });
+  flush();
+  return sorted;
+}
+function timeEvtHtml(e, iso){
+  const top = (e.startMin/60) * TIME_GRID_HOUR_HEIGHT;
+  const height = ((e.endMin-e.startMin)/60) * TIME_GRID_HOUR_HEIGHT;
+  const widthPct = 100/e.totalCols;
+  const leftPct = e.col * widthPct;
+  return `<div class="time-evt" data-event-id="${e.id}" style="top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${widthPct}% - 2px);background:${eventColor(e)};color:${eventTextColor(e)}">
+    <div class="time-evt-title">${esc(displayEventTitle(e, iso))}</div>
+    <div class="time-evt-time">${esc(formatTime12(e.startTime))}${e.endTime?'–'+esc(formatTime12(e.endTime)):''}</div>
+  </div>`;
+}
+function alldayPillHtml(e, iso){
+  return `<div class="allday-pill" data-event-id="${e.id}" style="background:${eventColor(e)};color:${eventTextColor(e)}">${esc(displayEventTitle(e, iso))}</div>`;
+}
+function hourAxisHtml(){
   let html = '';
-  for(let i=0;i<7;i++){
-    const d = new Date(start); d.setDate(d.getDate()+i);
-    const iso = isoOf(d);
-    const isToday = iso===todayISO();
-    const dayEvents = eventsOnDateFiltered(iso);
-    html += `<div class="week-col ${isToday?'today':''}" data-date="${iso}">
-      <div class="week-col-head">${DOW[d.getDay()]}<span class="cal-date-num">${d.getDate()}${moonBadge(iso)}</span></div>
-      ${dayEvents.length ? dayEvents.map(e=>`<div class="week-evt" data-event-id="${e.id}" style="background:${eventColor(e)}">${esc(displayEventTitle(e, iso))} <strong>${e.allDay?'All day':esc(formatTime12(e.startTime))}</strong></div>`).join('') : ''}
-    </div>`;
-  }
-  grid.innerHTML = html;
-  grid.querySelectorAll('.week-col').forEach(col=> col.addEventListener('click', (ev)=>{
-    const pill = ev.target.closest('.week-evt');
-    const evt = pill && findEventById(pill.dataset.eventId);
-    if(evt) openDayModal(col.dataset.date, evt); else openDayModal(col.dataset.date);
-  }));
+  for(let h=0; h<24; h++) html += `<div class="hour-label" style="top:${h*TIME_GRID_HOUR_HEIGHT}px">${hourLabel12(h)}</div>`;
+  return html;
 }
-function renderDayGrid(){
+function hourLinesHtml(){
+  let html = '';
+  for(let h=0; h<24; h++) html += `<div class="hour-line" style="top:${h*TIME_GRID_HOUR_HEIGHT}px"></div>`;
+  return html;
+}
+function nowLineHtml(){
+  const now = new Date();
+  const top = (now.getHours()*60+now.getMinutes())/60*TIME_GRID_HOUR_HEIGHT;
+  return `<div class="now-line" style="top:${top}px"></div>`;
+}
+/* Shared Outlook-style time grid for both Week (7 dates) and Day (1 date) views: an all-day
+   row pinned on top, then a shared scrollable hour grid where timed events are positioned by
+   actual start/end time (see timedEventGeometry/packTimedEvents) instead of just listed in
+   order. Month view is unaffected — it stays the compact multi-week grid it always was. */
+function renderTimeGrid(dates){
   const grid = document.getElementById('calGrid');
   grid.style.gridTemplateColumns = '1fr';
-  grid.style.gridTemplateRows = 'auto';
-  const iso = isoOf(dayCursor);
-  const dayEvents = eventsOnDateFiltered(iso); // already sorted: computed all-day, real all-day, then timed
-  grid.innerHTML = `<div class="day-view" data-date="${iso}">
-    ${dayEvents.length ? dayEvents.map(e=>`
-      <div class="day-evt" data-event-id="${e.id}" style="border-left-color:${eventBorderColor(e)}">
-        <div class="day-evt-title">${esc(displayEventTitle(e, iso))}</div>
-        <div class="day-evt-time">${e.allDay?'All day':esc(formatTime12(e.startTime))+(e.endTime?' – '+esc(formatTime12(e.endTime)):'')}</div>
-        ${e.notes?`<div class="day-evt-notes">📍 ${esc(e.notes)}</div>`:''}
-      </div>
-    `).join('') : '<div class="empty-note">Nothing scheduled.</div>'}
+  grid.style.gridTemplateRows = '1fr';
+  const showHeaders = dates.length > 1;
+  const today = todayISO();
+
+  const alldayColsHtml = dates.map(iso=>{
+    const d = new Date(iso+'T00:00:00');
+    const alldayEvts = eventsOnDateFiltered(iso).filter(e=>e.allDay);
+    return `<div class="allday-col" data-date="${iso}">
+      ${showHeaders ? `<div class="week-day-head ${iso===today?'today':''}">${DOW[d.getDay()]}<span class="cal-date-num">${d.getDate()}${moonBadge(iso)}</span></div>` : ''}
+      ${alldayEvts.map(e=>alldayPillHtml(e, iso)).join('')}
+    </div>`;
+  }).join('');
+
+  const timeColsHtml = dates.map(iso=>{
+    const timedEvts = eventsOnDateFiltered(iso).filter(e=>!e.allDay).map(e=> Object.assign({}, e, timedEventGeometry(e)));
+    const packed = packTimedEvents(timedEvts);
+    return `<div class="time-col ${iso===today?'today':''}" data-date="${iso}">
+      ${hourLinesHtml()}
+      ${packed.map(e=>timeEvtHtml(e, iso)).join('')}
+      ${iso===today ? nowLineHtml() : ''}
+    </div>`;
+  }).join('');
+
+  grid.innerHTML = `<div class="time-grid-wrap">
+    <div class="allday-row"><div class="hour-axis-spacer"></div>${alldayColsHtml}</div>
+    <div class="time-grid-scroll"><div class="time-grid-inner" style="height:${24*TIME_GRID_HOUR_HEIGHT}px">
+      <div class="hour-axis">${hourAxisHtml()}</div>
+      ${timeColsHtml}
+    </div></div>
   </div>`;
-  grid.querySelector('.day-view').addEventListener('click', (ev)=>{
-    const pill = ev.target.closest('.day-evt');
-    const evt = pill && findEventById(pill.dataset.eventId);
-    if(evt) openDayModal(iso, evt); else openDayModal(iso);
-  });
+
+  grid.querySelectorAll('.allday-col').forEach(col=> col.addEventListener('click', (ev)=>{
+    const pill = ev.target.closest('.allday-pill');
+    openEventForEdit(pill && pill.dataset.eventId, col.dataset.date);
+  }));
+  grid.querySelectorAll('.time-col').forEach(col=> col.addEventListener('click', (ev)=>{
+    const pill = ev.target.closest('.time-evt');
+    openEventForEdit(pill && pill.dataset.eventId, col.dataset.date);
+  }));
+
+  const scrollEl = grid.querySelector('.time-grid-scroll');
+  const now = new Date();
+  const scrollToHour = dates.includes(today) ? Math.max(0, now.getHours()-2) : 7;
+  scrollEl.scrollTop = scrollToHour * TIME_GRID_HOUR_HEIGHT;
+}
+function renderWeekGrid(){
+  const start = startOfWeek(weekCursor);
+  const dates = [];
+  for(let i=0;i<7;i++){ const d = new Date(start); d.setDate(d.getDate()+i); dates.push(isoOf(d)); }
+  renderTimeGrid(dates);
+}
+function renderDayGrid(){
+  renderTimeGrid([isoOf(dayCursor)]);
 }
 
 function iconPickerHtml(inputId, current){
@@ -1025,13 +1238,17 @@ function wireIconPicker(inputId){
   });
 }
 
-function openDayModal(iso, editEvent){
+function openDayModal(iso, editEvent, scopeCtx){
   const dayEvents = eventsOnDate(iso);
   const realAllDayIds = dayEvents.filter(e=>e.allDay && !e.holiday).map(e=>e.id);
   const dateLabel = new Date(iso+'T00:00:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
   const modalRoot = document.getElementById('modalRoot');
   const isEdit = !!editEvent;
+  const isOccurrenceEdit = isEdit && scopeCtx && scopeCtx.scope === 'occurrence';
   const rec = isEdit ? (editEvent.recurrence||'none') : 'none';
+  const normalizedRec = (rec==='daily'||rec==='biweekly') ? 'weekly' : rec;
+  const weeklyDaysDefault = isEdit ? eventWeeklyDays(editEvent) : [new Date(iso+'T00:00:00').getDay()];
+  const weeklyIntervalDefault = isEdit ? eventWeeklyInterval(editEvent) : 1;
 
   modalRoot.innerHTML = `
     <div class="modal-backdrop" id="backdrop">
@@ -1046,7 +1263,8 @@ function openDayModal(iso, editEvent){
                 <span style="font-size:13px;color:var(--ink-soft)">
                   ${e.allDay ? 'All day' : `${esc(formatTime12(e.startTime))}${e.endTime?' – '+esc(formatTime12(e.endTime)):''}`}
                   ${e.endDate && e.endDate!==e.date ? ' · through '+new Date(e.endDate+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}) : ''}
-                  ${e.recurrence && e.recurrence!=='none' ? ' · '+recurrenceLabel(e.recurrence) : ''}
+                  ${e.recurrence && e.recurrence!=='none' ? ' · '+recurrenceLabel(e) : ''}
+                  ${!e.holiday && e.recurrence && e.recurrence!=='none' && getEventException(e.id, e.occurrenceDate) ? ' · edited for this date' : ''}
                   ${e.workBlock ? ' · blocks work calendar' : ''}
                 </span>
                 ${e.notes ? `<br><span style="font-size:12px;color:var(--ink-soft)">📍 ${esc(e.notes)}</span>` : ''}
@@ -1067,6 +1285,7 @@ function openDayModal(iso, editEvent){
           `).join('') : '<div class="empty-note">Nothing scheduled yet.</div>'}
         </div>
         <div class="section-title" style="font-size:16px;margin-top:20px;">${isEdit?'Edit event':'Add event'}</div>
+        ${isOccurrenceEdit ? `<p class="section-sub">Editing just this date — other dates in the series aren't affected.</p>` : ''}
         <div class="field"><label>Title</label><input type="text" id="newEvtTitle" placeholder="Piano lesson" value="${isEdit?esc(editEvent.title):''}"></div>
 
         <div class="field"><label>Date</label><input type="date" id="newEvtDate" value="${isEdit?editEvent.date:iso}"></div>
@@ -1078,23 +1297,33 @@ function openDayModal(iso, editEvent){
           <div class="field"><label>End time</label><input type="time" id="newEvtEnd" value="${isEdit?(editEvent.endTime||''):defaultEventTime()}"></div>
         </div>
 
+        ${isOccurrenceEdit ? '' : `
         <div class="field"><label>Repeats</label>
           <select id="newEvtRepeat">
-            <option value="none" ${rec==='none'?'selected':''}>Doesn't repeat</option>
-            <option value="daily" ${rec==='daily'?'selected':''}>Every day</option>
-            <option value="weekly" ${rec==='weekly'?'selected':''}>Every week</option>
-            <option value="biweekly" ${rec==='biweekly'?'selected':''}>Every 2 weeks</option>
-            <option value="monthly-date" ${rec==='monthly-date'?'selected':''}>Monthly (same date)</option>
-            <option value="monthly-weekday" ${rec==='monthly-weekday'?'selected':''}>Monthly (same weekday — "1st Tuesday")</option>
-            <option value="yearly" ${rec==='yearly'?'selected':''}>Every year (birthdays, holidays)</option>
+            <option value="none" ${normalizedRec==='none'?'selected':''}>Doesn't repeat</option>
+            <option value="weekly" ${normalizedRec==='weekly'?'selected':''}>Weekly</option>
+            <option value="monthly-date" ${normalizedRec==='monthly-date'?'selected':''}>Monthly (same date)</option>
+            <option value="monthly-weekday" ${normalizedRec==='monthly-weekday'?'selected':''}>Monthly (same weekday — "1st Tuesday")</option>
+            <option value="yearly" ${normalizedRec==='yearly'?'selected':''}>Every year (birthdays, holidays)</option>
           </select>
         </div>
 
-        <div class="field" id="endDateField" style="${rec!=='none'?'display:none;':''}"><label>Lasts through (only if more than one day — e.g. a trip)</label>
+        <div class="field" id="weeklyPatternField" style="${normalizedRec==='weekly'?'':'display:none;'}">
+          <label>Which days</label>
+          <div class="day-checkboxes" id="newEvtWeeklyDays">
+            ${DAY_ABBR.map((abbr,d)=>`<label class="day-checkbox"><input type="checkbox" value="${d}" ${weeklyDaysDefault.includes(d)?'checked':''}>${abbr}</label>`).join('')}
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-weight:600;font-size:14px;color:var(--ink-soft);">Every
+            <input type="number" id="newEvtWeeklyInterval" min="1" max="12" value="${weeklyIntervalDefault}" style="width:56px;padding:6px;border:1px solid var(--paper-line);border-radius:6px;">
+            week(s)</label>
+        </div>
+
+        <div class="field" id="endDateField" style="${normalizedRec!=='none'?'display:none;':''}"><label>Lasts through (only if more than one day — e.g. a trip)</label>
           <input type="date" id="newEvtEndDate" value="${isEdit&&editEvent.endDate&&editEvent.endDate!==editEvent.date?editEvent.endDate:''}"></div>
 
-        <div class="field" id="birthYearField" style="${rec==='yearly'?'':'display:none;'}"><label>Birth year (optional — shows the age they're turning each year)</label>
+        <div class="field" id="birthYearField" style="${normalizedRec==='yearly'?'':'display:none;'}"><label>Birth year (optional — shows the age they're turning each year)</label>
           <input type="number" id="newEvtBirthYear" min="1900" max="2100" placeholder="2019" value="${isEdit&&editEvent.birthYear?editEvent.birthYear:''}"></div>
+        `}
 
         <div class="field"><label>Notes (location, details, etc.)</label>
           <textarea id="newEvtNotes" rows="2" placeholder="123 Main St, bring cleats">${isEdit?esc(editEvent.notes||''):''}</textarea></div>
@@ -1132,16 +1361,22 @@ function openDayModal(iso, editEvent){
   document.getElementById('allDayCheck').addEventListener('change', (e)=>{
     document.getElementById('timeFields').classList.toggle('hidden', e.target.checked);
   });
-  document.getElementById('newEvtRepeat').addEventListener('change', (e)=>{
-    document.getElementById('endDateField').style.display = e.target.value==='none' ? '' : 'none';
-    document.getElementById('birthYearField').style.display = e.target.value==='yearly' ? '' : 'none';
-  });
+  if(!isOccurrenceEdit){
+    document.getElementById('newEvtRepeat').addEventListener('change', (e)=>{
+      const v = e.target.value;
+      document.getElementById('endDateField').style.display = v==='none' ? '' : 'none';
+      document.getElementById('birthYearField').style.display = v==='yearly' ? '' : 'none';
+      document.getElementById('weeklyPatternField').style.display = v==='weekly' ? '' : 'none';
+    });
+  }
   const dateInput = document.getElementById('newEvtDate');
   const endDateInput = document.getElementById('newEvtEndDate');
   const startInput = document.getElementById('newEvtStart');
   const endInput = document.getElementById('newEvtEnd');
-  endDateInput.min = dateInput.value;
-  dateInput.addEventListener('change', ()=>{ endDateInput.min = dateInput.value; });
+  if(endDateInput){
+    endDateInput.min = dateInput.value;
+    dateInput.addEventListener('change', ()=>{ endDateInput.min = dateInput.value; });
+  }
   endInput.min = startInput.value;
   startInput.addEventListener('change', ()=>{
     endInput.min = startInput.value;
@@ -1150,12 +1385,20 @@ function openDayModal(iso, editEvent){
   document.getElementById('closeModal').addEventListener('click', closeModal);
   document.getElementById('cancelEvtBtn').addEventListener('click', closeModal);
   document.getElementById('backdrop').addEventListener('click', (e)=>{ if(e.target.id==='backdrop') closeModal(); });
-  modalRoot.querySelectorAll('[data-del]').forEach(btn=> btn.addEventListener('click', ()=> deleteEvent(btn.dataset.del, iso)));
+  modalRoot.querySelectorAll('[data-del]').forEach(btn=> btn.addEventListener('click', ()=>{
+    const evt = dayEvents.find(e=>e.id===btn.dataset.del);
+    if(!evt) return;
+    if(evt.recurrence && evt.recurrence!=='none') openRecurrenceScopeModal(evt, iso, 'delete');
+    else deleteEvent(evt.id, iso);
+  }));
   modalRoot.querySelectorAll('[data-move-dir]').forEach(btn=> btn.addEventListener('click', ()=> moveEventOrder(btn.dataset.moveId, iso, btn.dataset.moveDir==='up'?-1:1)));
   modalRoot.querySelectorAll('[data-edit]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ const evt = state.events.find(e=>e.id===btn.dataset.edit); if(evt) openDayModal(iso, evt); });
+    btn.addEventListener('click', ()=> openEventForEdit(btn.dataset.edit, iso));
   });
-  if(isEdit) document.getElementById('deleteFromEditBtn').addEventListener('click', ()=> deleteEvent(editEvent.id, iso));
+  if(isEdit) document.getElementById('deleteFromEditBtn').addEventListener('click', ()=>{
+    if(isOccurrenceEdit) deleteEventOccurrence(editEvent.id, scopeCtx.originalDate, iso);
+    else deleteEvent(editEvent.id, iso);
+  });
 
   document.getElementById('saveEvtBtn').addEventListener('click', ()=>{
     const title = document.getElementById('newEvtTitle').value.trim();
@@ -1168,21 +1411,67 @@ function openDayModal(iso, editEvent){
     if(!allDay && startTime && endTime && endTime < startTime){
       showToast('End time can\'t be before the start time.'); return;
     }
+    const notes = document.getElementById('newEvtNotes').value.trim();
+    const workBlock = document.getElementById('workBlockCheck').checked;
+
+    if(isOccurrenceEdit){
+      const data = { title, date: dateVal, allDay, startTime, endTime, notes, assignees: Array.from(selected), workBlock };
+      saveEventException(editEvent.id, scopeCtx.originalDate, data);
+      closeModal();
+      return;
+    }
+
     const recurrence = document.getElementById('newEvtRepeat').value;
     const endDateVal = recurrence==='none' ? document.getElementById('newEvtEndDate').value : '';
     if(endDateVal && endDateVal < dateVal){
       showToast('The "lasts through" date can\'t be before the start date.'); return;
     }
+    let weeklyDays = null, weeklyInterval = null;
+    if(recurrence === 'weekly'){
+      weeklyDays = Array.from(modalRoot.querySelectorAll('#newEvtWeeklyDays input:checked')).map(i=>parseInt(i.value,10));
+      if(!weeklyDays.length){ showToast('Pick at least one day for the weekly pattern.'); return; }
+      weeklyInterval = parseInt(document.getElementById('newEvtWeeklyInterval').value, 10) || 1;
+      if(weeklyInterval < 1) weeklyInterval = 1;
+    }
     const birthYearRaw = recurrence==='yearly' ? document.getElementById('newEvtBirthYear').value : '';
     const birthYear = birthYearRaw ? parseInt(birthYearRaw, 10) : null;
-    const notes = document.getElementById('newEvtNotes').value.trim();
-    const workBlock = document.getElementById('workBlockCheck').checked;
-    const data = { title, date: dateVal, endDate: endDateVal || dateVal, allDay, startTime, endTime, recurrence, birthYear, notes, assignees: Array.from(selected), workBlock };
+    const data = { title, date: dateVal, endDate: endDateVal || dateVal, allDay, startTime, endTime, recurrence, weeklyDays, weeklyInterval, birthYear, notes, assignees: Array.from(selected), workBlock };
     if(isEdit) updateEvent(editEvent.id, data); else saveEvent(data);
     closeModal();
   });
 }
 function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
+
+/* Choosing to edit or delete "just this date" vs "the whole series" for a recurring event.
+   "Just this date" routes to an eventExceptions doc (saveEventException/deleteEventOccurrence);
+   "the whole series" routes to the normal event doc (updateEvent/deleteEvent), same as any
+   non-recurring event. `evt` here is the already-resolved occurrence from eventsOnDate() (so
+   evt.occurrenceDate is set), not the raw base event doc. */
+function openRecurrenceScopeModal(evt, iso, action){
+  const modalRoot = document.getElementById('modalRoot');
+  const verb = action === 'edit' ? 'Edit' : 'Delete';
+  modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">
+    <button class="close-x" id="closeModal">✕</button>
+    <h3>${verb} "${esc(evt.title)}"</h3>
+    <p class="section-sub">This is a repeating event. ${verb} just this date, or the whole series?</p>
+    <div class="modal-actions" style="flex-direction:column;align-items:stretch;">
+      <button class="btn btn-primary" id="scopeOccurrence">${verb} just this date</button>
+      <button class="btn btn-secondary" id="scopeSeries">${verb} the whole series</button>
+      <button class="btn btn-secondary" id="scopeCancel">Cancel</button>
+    </div>
+  </div></div>`;
+  document.getElementById('closeModal').addEventListener('click', closeModal);
+  document.getElementById('scopeCancel').addEventListener('click', closeModal);
+  document.getElementById('backdrop').addEventListener('click', e=>{ if(e.target.id==='backdrop') closeModal(); });
+  document.getElementById('scopeOccurrence').addEventListener('click', ()=>{
+    if(action==='edit') openDayModal(iso, evt, {scope:'occurrence', originalDate: evt.occurrenceDate});
+    else deleteEventOccurrence(evt.id, evt.occurrenceDate, iso);
+  });
+  document.getElementById('scopeSeries').addEventListener('click', ()=>{
+    if(action==='edit') openDayModal(iso, findEventById(evt.id), {scope:'series'});
+    else deleteEvent(evt.id, iso);
+  });
+}
 
 function saveEvent(evt){
   const localId = uid('local');
@@ -1202,6 +1491,36 @@ function updateEvent(id, data){
   renderAll();
   if(firebaseReady && !String(id).startsWith('local')) dbWrite(db.collection('events').doc(id).update(data));
   if(data.workBlock) sendWorkBlockEmail(data, 'ADD');
+}
+/* Single-occurrence override, keyed by the SAME composite-string-as-doc-id pattern as
+   routineLog/choreLog/recurringReminderLog (`${eventId}_${originalDate}`) rather than an
+   auto-generated id, so saving is always a plain upsert with no need to look up whether a doc
+   already exists first. `originalDate` is the occurrence's un-moved slot date, never the
+   possibly-edited-in `date` field inside `data`. */
+function saveEventException(eventId, originalDate, data){
+  const key = `${eventId}_${originalDate}`;
+  const prevEx = state.eventExceptions[key];
+  const baseEvent = findEventById(eventId);
+  const prevEffective = Object.assign({}, baseEvent, (prevEx && prevEx.overrides) || {});
+  if(prevEffective.workBlock) sendWorkBlockEmail(prevEffective, 'REMOVE');
+  if(data.workBlock) data.tag = `FAMILYAPP-${data.date}-${data.title.replace(/\s+/g,'').slice(0,20)}-${Date.now()}`;
+  const exData = { eventId, date: originalDate, deleted: false, overrides: data };
+  state.eventExceptions[key] = { id: key, ...exData };
+  renderAll();
+  if(firebaseReady) dbWrite(db.collection('eventExceptions').doc(key).set(exData));
+  if(data.workBlock) sendWorkBlockEmail(data, 'ADD');
+}
+function deleteEventOccurrence(eventId, originalDate, dayIso){
+  const key = `${eventId}_${originalDate}`;
+  const prevEx = state.eventExceptions[key];
+  const baseEvent = findEventById(eventId);
+  const prevEffective = Object.assign({}, baseEvent, (prevEx && prevEx.overrides) || {});
+  if(prevEffective.workBlock) sendWorkBlockEmail(prevEffective, 'REMOVE');
+  const exData = { eventId, date: originalDate, deleted: true };
+  state.eventExceptions[key] = { id: key, ...exData };
+  renderAll();
+  if(firebaseReady) dbWrite(db.collection('eventExceptions').doc(key).set(exData));
+  openDayModal(dayIso);
 }
 function moveEventOrder(id, dayIso, direction){
   // Reorders only among real (non-holiday) all-day events on this specific day. Note: an
@@ -1223,9 +1542,19 @@ function moveEventOrder(id, dayIso, direction){
   openDayModal(dayIso);
 }
 function deleteEvent(id, dayIso){
+  // Deleting the whole series also cleans up any per-occurrence exceptions on it, so they don't
+  // linger as orphaned Firestore docs. This does not separately un-block any occurrence whose
+  // exception had its OWN workBlock override on (a rare combination) — only the base event's own
+  // work-block state is removed, same "not a true update" limitation already documented for
+  // work-calendar blocks generally.
   const evt = state.events.find(e=>e.id===id);
   state.events = state.events.filter(e=>e.id!==id);
-  if(firebaseReady && !String(id).startsWith('local')) dbWrite(db.collection('events').doc(id).delete());
+  const exceptionKeys = Object.keys(state.eventExceptions).filter(k => state.eventExceptions[k].eventId === id);
+  exceptionKeys.forEach(k => delete state.eventExceptions[k]);
+  if(firebaseReady){
+    if(!String(id).startsWith('local')) dbWrite(db.collection('events').doc(id).delete());
+    exceptionKeys.forEach(k => dbWrite(db.collection('eventExceptions').doc(k).delete()));
+  }
   if(evt && evt.workBlock) sendWorkBlockEmail(evt, 'REMOVE');
   renderCalendar();
   openDayModal(dayIso);
@@ -1254,19 +1583,21 @@ function openFamilyModal(existing){
       <option value="child" ${isEdit&&existing.role==='child'?'selected':''}>Child</option>
     </select></div>
     <div class="field"><label>Color</label><input type="color" id="famColor" value="${isEdit?existing.color:'#'+Math.floor(Math.random()*16777215).toString(16).padStart(6,'0')}"></div>
+    <div class="field"><label>Text color (for calendar pills)</label>${colorFieldHtml('famTextColor', (isEdit&&existing.textColor)||'#FFFFFF', TEXT_COLOR_PRESETS)}</div>
     <div class="modal-actions">
       <button class="btn btn-primary" id="famSave">Save</button>
       ${isEdit?'<button class="btn btn-danger" id="famDelete">Remove</button>':''}
       <button class="btn btn-secondary" id="famCancel">Cancel</button>
     </div>
   </div></div>`;
+  wireColorField('famTextColor');
   document.getElementById('closeModal').addEventListener('click', closeModal);
   document.getElementById('famCancel').addEventListener('click', closeModal);
   document.getElementById('backdrop').addEventListener('click', e=>{ if(e.target.id==='backdrop') closeModal(); });
   document.getElementById('famSave').addEventListener('click', ()=>{
     const name = document.getElementById('famName').value.trim();
     if(!name){ showToast('Name it first.'); return; }
-    const data = { name, role: document.getElementById('famRole').value, color: document.getElementById('famColor').value };
+    const data = { name, role: document.getElementById('famRole').value, color: document.getElementById('famColor').value, textColor: document.getElementById('famTextColor').value };
     if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('family').doc(existing.id).update(data)); }
     else { data.order = state.family.length; if(firebaseReady) dbWrite(db.collection('family').add(data)); else state.family.push({id:uid('local'), ...data}); }
     renderAll(); closeModal();
@@ -1551,6 +1882,15 @@ function renderSettings(){
   rrEl.querySelectorAll('[data-rr-edit]').forEach(btn=> btn.addEventListener('click', ()=> openRecurringReminderModal(state.recurringReminders.find(x=>x.id===btn.dataset.rrEdit))));
   wireMoveArrows(rrEl, { recurringReminders: sortedRecurringReminders });
 
+  const everyoneColorInput = document.getElementById('everyoneColorInput');
+  if(everyoneColorInput && document.activeElement !== everyoneColorInput) everyoneColorInput.value = state.settings.everyoneColor || '#3A362C';
+  const everyoneTextColorField = document.getElementById('everyoneTextColorField');
+  const etcInput = document.getElementById('everyoneTextColorInput');
+  if(everyoneTextColorField && (!etcInput || document.activeElement !== etcInput)){
+    everyoneTextColorField.innerHTML = colorFieldHtml('everyoneTextColorInput', state.settings.everyoneTextColor || '#FFFFFF', TEXT_COLOR_PRESETS);
+    wireColorField('everyoneTextColorInput');
+  }
+
   const anchorInput = document.getElementById('payAnchorInput');
   const typeInput = document.getElementById('payTypeInput');
   if(anchorInput && document.activeElement !== anchorInput) anchorInput.value = state.settings.payPeriodAnchor || todayISO();
@@ -1607,6 +1947,15 @@ document.getElementById('saveWorkEmailBtn').addEventListener('click', ()=>{
   if(firebaseReady) dbWrite(db.collection('settings').doc('main').set(data, {merge:true}));
   renderAll();
 });
+document.getElementById('saveEveryoneColorBtn').addEventListener('click', ()=>{
+  const data = Object.assign({}, state.settings, {
+    everyoneColor: document.getElementById('everyoneColorInput').value,
+    everyoneTextColor: document.getElementById('everyoneTextColorInput').value,
+  });
+  state.settings = data;
+  if(firebaseReady) dbWrite(db.collection('settings').doc('main').set(data, {merge:true}));
+  renderAll();
+});
 
 /* ============================== Tabs ============================== */
 document.querySelectorAll('nav.tabs button').forEach(btn=>{
@@ -1621,6 +1970,7 @@ document.querySelectorAll('nav.tabs button').forEach(btn=>{
 
 /* ============================== Master render ============================== */
 function renderAll(){
+  applyEveryoneColorVars();
   renderReminders();
   renderRoutineColumns();
   renderChoreColumns();
