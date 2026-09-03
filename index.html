@@ -335,8 +335,15 @@ const state = {
   recurringReminders: [], recurringReminderLog: {},
   settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '', everyoneColor: '#3A362C', everyoneTextColor: '#FFFFFF' }
 };
-const todayISO = () => new Date().toISOString().slice(0,10);
-const isoOf = d => d.toISOString().slice(0,10);
+/* Local calendar date, not UTC — .toISOString() rolls over to the next date up to several hours
+   before local midnight for any timezone behind UTC (e.g. ~5pm Pacific already reads as
+   "tomorrow" in UTC), which was silently mis-dating everything keyed by "today": an evening
+   routine/chore checked off after that point got logged under tomorrow's date, so it was still
+   showing as done first thing the next morning instead of resetting. localIsoOf() already did
+   this correctly (built for mapping precise UTC instants like equinox times to the right local
+   calendar day) — isoOf()/todayISO() now go through the same local-date math. */
+const todayISO = () => isoOf(new Date());
+const isoOf = d => localIsoOf(d);
 const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function memberById(id){ return state.family.find(m => m.id === id); }
 function colorOf(id){ const m = memberById(id); return m ? m.color : '#999'; }

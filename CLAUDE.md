@@ -83,6 +83,16 @@ thing you can do first — it will likely surface real bugs that were never actu
 - iOS "Smart Punctuation" converts straight quotes to curly quotes on paste, which breaks the
   Firestore rules parser. Not a code bug, but worth knowing if the user reports rules errors
   again.
+- `todayISO()`/`isoOf()` used `.toISOString()`, which is always UTC — for any timezone behind
+  UTC (all of the US), that rolls over to the next calendar date several hours *before* local
+  midnight (e.g. ~5pm Pacific already reads as "tomorrow" in UTC). Everything keyed by "today"
+  was silently affected: an evening routine/chore checked off after that point got logged under
+  tomorrow's date, so it was still showing as done first thing the next morning instead of
+  resetting. `localIsoOf()` already did this correctly (built for mapping precise UTC instants
+  like equinox times to the right local calendar day, see below) but that fix was never applied
+  to `isoOf()`/`todayISO()` themselves — they now go through the same local-date math. If a
+  "today" bug is ever reported again, check whether it's this class of issue before assuming
+  it's something new: search for any stray `.toISOString()` reintroduced outside `localIsoOf()`.
 
 ## Data model (Firestore collections)
 
