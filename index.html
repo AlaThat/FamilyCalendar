@@ -118,6 +118,8 @@
   .day-checkboxes{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
   .day-checkbox{ display:flex; flex-direction:column; align-items:center; gap:4px; font-size:12px; font-weight:600; color:var(--ink-soft); }
   .day-checkbox input{ width:20px; height:20px; }
+  .member-days-row{ border-left:4px solid #ccc; padding:8px 0 8px 12px; margin-bottom:10px; }
+  .member-days-name{ font-size:13px; font-weight:700; margin-bottom:6px; }
   .radio-row label{ display:flex; align-items:center; gap:6px; font-weight:400; }
   .assignee-toggles{ display:flex; gap:8px; flex-wrap:wrap; }
   .assignee-toggle{ padding:7px 12px; border-radius:999px; border:2px solid var(--paper-line); cursor:pointer; font-size:14px; font-weight:600; background:var(--white); }
@@ -650,9 +652,8 @@ function daysArrayForSchedule(schedule){
   return [0,1,2,3,4,5,6]; // 'daily' or unset
 }
 function effectiveDays(r){
-  // New routines store an explicit `days` array (per-day checkboxes); older routines and
-  // recurring reminders still carry the original daily/weekday/weekend `schedule` field —
-  // derive the equivalent days from that so both shapes work everywhere transparently.
+  // Legacy fallback only (reminders, and routines saved before per-assignee days existed):
+  // a single shared days array, or the original daily/weekday/weekend `schedule` field.
   return Array.isArray(r.days) ? r.days : daysArrayForSchedule(r.schedule);
 }
 function daysLabel(days){
@@ -663,12 +664,35 @@ function daysLabel(days){
   return [0,1,2,3,4,5,6].filter(d=>set.has(d)).map(d=>DAY_ABBR[d]).join(', ') || 'Never';
 }
 function appliesToday(r){ return effectiveDays(r).includes(new Date().getDay()); }
+function effectiveDaysForMember(routine, memberId){
+  // Each assignee can have their own day pattern on the same routine (e.g. one kid's bath
+  // nights differ from another's) — perMemberDays[memberId] wins when set. Routines saved
+  // before this existed (or a newly-added assignee with no entry yet) fall back to the
+  // routine's own shared days/schedule via effectiveDays().
+  if(routine.perMemberDays && Array.isArray(routine.perMemberDays[memberId])) return routine.perMemberDays[memberId];
+  return effectiveDays(routine);
+}
+function routineAppliesTodayFor(routine, memberId){
+  return effectiveDaysForMember(routine, memberId).includes(new Date().getDay());
+}
+function routineDaysSummary(routine){
+  const memberIds = routine.assignedTo || [];
+  if(!memberIds.length) return 'nobody yet';
+  const perMember = memberIds.map(id => ({ id, days: effectiveDaysForMember(routine, id) }));
+  const key = d => d.slice().sort().join(',');
+  const allSame = perMember.every(p => key(p.days) === key(perMember[0].days));
+  if(allSame) return daysLabel(perMember[0].days);
+  return perMember.map(p => `${esc(memberById(p.id)?.name||'?')}: ${daysLabel(p.days)}`).join(' · ');
+}
 function renderRoutineColumns(){
   const el = document.getElementById('routineColumns');
-  const kids = state.family.filter(m => m.role === 'child');
-  if(!kids.length){ el.innerHTML = '<div class="empty-note">Add family members in Settings to see routines here.</div>'; return; }
-  el.innerHTML = kids.map(kid => {
-    const items = state.routines.filter(r => appliesToday(r) && (r.assignedTo||[]).includes(kid.id)).sort(byOrder);
+  // Kids always get a card (an invitation to add routines even with none yet); adults only
+  // show up once at least one routine is actually assigned to them, so households that don't
+  // use adult routines don't see empty parent cards cluttering the Today tab.
+  const members = state.family.filter(m => m.role==='child' || state.routines.some(r => (r.assignedTo||[]).includes(m.id)));
+  if(!members.length){ el.innerHTML = '<div class="empty-note">Add family members in Settings to see routines here.</div>'; return; }
+  el.innerHTML = members.map(member => {
+    const items = state.routines.filter(r => routineAppliesTodayFor(r, member.id) && (r.assignedTo||[]).includes(member.id)).sort(byOrder);
     const groups = [['morning','Morning'],['evening','Evening'],['anytime','Anytime']];
     let body = '';
     groups.forEach(([key,label])=>{
@@ -676,16 +700,16 @@ function renderRoutineColumns(){
       if(!groupItems.length) return;
       body += `<div class="subhead">${label}</div>`;
       body += groupItems.map(r => {
-        const logKey = `${todayISO()}_${r.id}_${kid.id}`;
+        const logKey = `${todayISO()}_${r.id}_${member.id}`;
         const done = !!state.routineLog[logKey];
         return `<div class="routine-item">
-          <div class="check-btn ${done?'done':''}" data-routine="${r.id}" data-member="${kid.id}">${done?'✓':''}</div>
+          <div class="check-btn ${done?'done':''}" data-routine="${r.id}" data-member="${member.id}">${done?'✓':''}</div>
           <div class="item-icon">${esc(r.icon||'⭐')}</div><div class="item-label">${esc(r.title)}</div></div>`;
       }).join('');
     });
     if(!body) body = '<div class="empty-note">No routines assigned yet.</div>';
-    return `<div class="member-card" style="border-top-color:${kid.color}">
-      <h3><span class="dot" style="width:16px;height:16px;background:${kid.color}"></span>${esc(kid.name)}</h3>${body}</div>`;
+    return `<div class="member-card" style="border-top-color:${member.color}">
+      <h3><span class="dot" style="width:16px;height:16px;background:${member.color}"></span>${esc(member.name)}</h3>${body}</div>`;
   }).join('');
   el.querySelectorAll('.check-btn').forEach(btn=> btn.addEventListener('click', ()=> toggleRoutine(btn.dataset.routine, btn.dataset.member)));
 }
@@ -1230,7 +1254,7 @@ function openFamilyModal(existing){
 }
 function openRoutineModal(existing){
   const isEdit = !!existing;
-  const kids = state.family.filter(m=>m.role==='child');
+  const assignableMembers = state.family;
   const modalRoot = document.getElementById('modalRoot');
   modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">
     <button class="close-x" id="closeModal">✕</button>
@@ -1242,18 +1266,13 @@ function openRoutineModal(existing){
       <option value="evening" ${isEdit&&existing.timeOfDay==='evening'?'selected':''}>Evening</option>
       <option value="anytime" ${!isEdit||!existing.timeOfDay||existing.timeOfDay==='anytime'?'selected':''}>Anytime</option>
     </select></div>
-    <div class="field"><label>Which days</label>
-      <div class="day-checkboxes" id="rtDays">
-        ${DAY_ABBR.map((abbr,d)=>{
-          const on = isEdit ? effectiveDays(existing).includes(d) : true;
-          return `<label class="day-checkbox"><input type="checkbox" value="${d}" ${on?'checked':''}>${abbr}</label>`;
-        }).join('')}
-      </div>
-    </div>
     <div class="field"><label>Who</label><div class="assignee-toggles" id="rtAssignees">
-      ${kids.map(k=>{ const on = isEdit && (existing.assignedTo||[]).includes(k.id);
-        return `<div class="assignee-toggle" data-member="${k.id}" style="--c:${k.color};${on?`background:${k.color};border-color:${k.color};color:white;`:''}">${esc(k.name)}</div>`; }).join('')}
+      ${assignableMembers.map(m=>{ const on = isEdit && (existing.assignedTo||[]).includes(m.id);
+        return `<div class="assignee-toggle" data-member="${m.id}" style="--c:${m.color};${on?`background:${m.color};border-color:${m.color};color:white;`:''}">${esc(m.name)}</div>`; }).join('')}
     </div></div>
+    <div class="field"><label>Which days (set per person — e.g. different bath nights for each kid)</label>
+      <div id="rtDaysContainer"></div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-primary" id="rtSave">Save</button>
       ${isEdit?'<button class="btn btn-danger" id="rtDelete">Remove</button>':''}
@@ -1262,11 +1281,28 @@ function openRoutineModal(existing){
   </div></div>`;
   wireIconPicker('rtIcon');
   const selected = new Set(isEdit ? (existing.assignedTo||[]) : []);
+  function renderDaysRows(){
+    const container = document.getElementById('rtDaysContainer');
+    const ids = Array.from(selected);
+    if(!ids.length){ container.innerHTML = '<div class="empty-note">Pick who this is for above, then set their days.</div>'; return; }
+    container.innerHTML = ids.map(id=>{
+      const member = memberById(id);
+      const days = isEdit ? effectiveDaysForMember(existing, id) : [0,1,2,3,4,5,6];
+      return `<div class="member-days-row" style="border-left-color:${member?member.color:'#ccc'}">
+        <div class="member-days-name">${esc(member?member.name:'?')}</div>
+        <div class="day-checkboxes" data-days-for="${id}">
+          ${DAY_ABBR.map((abbr,d)=>`<label class="day-checkbox"><input type="checkbox" value="${d}" ${days.includes(d)?'checked':''}>${abbr}</label>`).join('')}
+        </div>
+      </div>`;
+    }).join('');
+  }
+  renderDaysRows();
   modalRoot.querySelectorAll('#rtAssignees .assignee-toggle').forEach(t=>{
     t.addEventListener('click', ()=>{
       const id = t.dataset.member;
       if(selected.has(id)){ selected.delete(id); t.style.background=''; t.style.borderColor=''; t.style.color=''; }
       else { selected.add(id); t.style.background=t.style.getPropertyValue('--c'); t.style.borderColor=t.style.getPropertyValue('--c'); t.style.color='white'; }
+      renderDaysRows();
     });
   });
   document.getElementById('closeModal').addEventListener('click', closeModal);
@@ -1275,9 +1311,14 @@ function openRoutineModal(existing){
   document.getElementById('rtSave').addEventListener('click', ()=>{
     const title = document.getElementById('rtTitle').value.trim();
     if(!title){ showToast('Name the routine first.'); return; }
-    const days = Array.from(modalRoot.querySelectorAll('#rtDays input:checked')).map(i=>parseInt(i.value,10));
-    if(!days.length){ showToast('Pick at least one day.'); return; }
-    const data = { title, icon: document.getElementById('rtIcon').value.trim()||'⭐', days, timeOfDay: document.getElementById('rtTimeOfDay').value, assignedTo: Array.from(selected) };
+    const assignedTo = Array.from(selected);
+    const perMemberDays = {};
+    for(const id of assignedTo){
+      const days = Array.from(modalRoot.querySelectorAll(`[data-days-for="${id}"] input:checked`)).map(i=>parseInt(i.value,10));
+      if(!days.length){ showToast(`Pick at least one day for ${esc(memberById(id)?.name||'each person')}.`); return; }
+      perMemberDays[id] = days;
+    }
+    const data = { title, icon: document.getElementById('rtIcon').value.trim()||'⭐', timeOfDay: document.getElementById('rtTimeOfDay').value, assignedTo, perMemberDays };
     if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('routines').doc(existing.id).update(data)); }
     else { data.order = state.routines.length; if(firebaseReady) dbWrite(db.collection('routines').add(data)); else state.routines.push({id:uid('local'), ...data}); }
     renderAll(); closeModal();
@@ -1395,9 +1436,11 @@ function renderSettings(){
   rEl.innerHTML = sortedRoutines.map(r=>{
     const names = (r.assignedTo||[]).map(id=> memberById(id)?.name).filter(Boolean).join(', ') || 'nobody yet';
     const todLabel = r.timeOfDay==='morning'?'Morning':r.timeOfDay==='evening'?'Evening':'Anytime';
+    const summary = routineDaysSummary(r);
+    const daysAndWho = summary.includes(' · ') ? summary : `${summary} · ${esc(names)}`; // per-member breakdown already names everyone
     return `<div class="list-row">
       <span class="item-icon">${esc(r.icon||'⭐')}</span>
-      <div class="grow"><strong>${esc(r.title)}</strong> <span class="status-pill">${todLabel} · ${daysLabel(effectiveDays(r))} · ${esc(names)}</span></div>
+      <div class="grow"><strong>${esc(r.title)}</strong> <span class="status-pill">${todLabel} · ${daysAndWho}</span></div>
       ${moveArrowsHtml('routines', sortedRoutines, r.id)}
       <button class="small-btn" data-rt-edit="${r.id}">Edit</button>
     </div>`;

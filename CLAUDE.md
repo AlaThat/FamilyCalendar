@@ -87,15 +87,24 @@ thing you can do first — it will likely surface real bugs that were never actu
 ## Data model (Firestore collections)
 
 - `family`: `{name, role: 'parent'|'child', color, order}`
-- `routines`: `{title, icon, days: [0-6] (Sun=0..Sat=6, per-day checkboxes, default all 7),
-  timeOfDay: 'morning'|'evening'|'anytime', assignedTo: [memberId], order}`. Older routines may
-  still carry the original `schedule: 'daily'|'weekday'|'weekend'` instead of `days` — always
-  read schedule through `effectiveDays(routine)`, which returns `days` when present or derives
-  the equivalent array from `schedule` otherwise, so both shapes work everywhere without a
-  migration. A routine's day pattern applies to every assignee alike; if two kids on the same
-  routine need different days (e.g. one goes to school Mon-Fri, the other Mon/Wed/Fri), create
-  two routines with the same title, each assigned to just the one kid with its own days —
-  simpler than a per-assignee days-override field, at the cost of a second list entry.
+- `routines`: `{title, icon, timeOfDay: 'morning'|'evening'|'anytime', assignedTo: [memberId],
+  perMemberDays: {memberId: [0-6]} (Sun=0..Sat=6), order}`. `assignedTo` is no longer kids-only —
+  routines can be assigned to parents too (e.g. a "take vitamins" routine), and a member with at
+  least one routine assigned gets their own Today-tab card; a member with none doesn't, so
+  households that skip adult routines see no empty cards. Each assignee gets their own day
+  pattern on the same routine (e.g. one kid's bath nights differ from another's, or one goes to
+  school Mon-Fri while another goes Mon/Wed/Fri) — this was deliberately NOT modeled by putting a
+  fixed schedule on the family member, since a single person can need different day patterns for
+  different routines (school days vs. bath nights) at the same time. Always read a routine's
+  schedule through `effectiveDaysForMember(routine, memberId)`, which checks
+  `perMemberDays[memberId]` first, then falls back to `effectiveDays(routine)` for a member with
+  no explicit entry (a newly-added assignee, or the whole routine on a doc saved before per-member
+  days existed — including last round's shape, a single shared top-level `days` array — or the
+  original `schedule: 'daily'|'weekday'|'weekend'` string from before that). Editing a legacy
+  routine and saving transparently upgrades it to `perMemberDays` for its current assignees; no
+  batch migration needed. The Add/Edit Routine modal builds one day-checkbox row per currently
+  selected assignee, defaulting to all 7 days for an assignee with no existing entry, and
+  refreshes live as assignees are toggled on/off.
 - `routineLog`: doc id `${date}_${routineId}_${memberId}` → `{date, routineId, memberId, done}`
 - `chores`: `{title, icon, type: 'pool'|'assigned', value, status: 'open'|'claimed'|'done',
   assignedTo, claimedBy, order}` — for `type==='assigned'`, `assignedTo` is `[memberId]` (can be
