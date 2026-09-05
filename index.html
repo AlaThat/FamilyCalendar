@@ -243,12 +243,6 @@
         <button class="add-row-btn" id="addChoreBtn">+ Add chore</button>
       </div>
       <div class="settings-block">
-        <div class="section-title">Recurring reminders</div>
-        <p class="section-sub">Show up automatically on the Reminders tab on the days you pick, no need to re-add them. For one-off reminders, use the Reminders tab instead.</p>
-        <div id="recurringReminderList"></div>
-        <button class="add-row-btn" id="addRecurringReminderBtn">+ Add recurring reminder</button>
-      </div>
-      <div class="settings-block">
         <div class="section-title">Payout</div>
         <div class="field"><label>An actual payday date (any one — we'll figure out the cycle from there)</label><input type="date" id="payAnchorInput"></div>
         <div class="field"><label>How often</label>
@@ -332,7 +326,7 @@ if(firebaseReady){
 /* ---------------- State ---------------- */
 const state = {
   family: [], routines: [], routineLog: {}, chores: [], choreLog: {}, earnings: [], events: [], eventExceptions: {}, reminders: [],
-  recurringReminders: [], recurringReminderLog: {},
+  recurringReminders: [], reminderCompletions: {},
   settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '', everyoneColor: '#3A362C', everyoneTextColor: '#FFFFFF' }
 };
 /* Local calendar date, not UTC — .toISOString() rolls over to the next date up to several hours
@@ -403,6 +397,31 @@ function watchCollection(name, cb){
   db.collection(name).onSnapshot(snap => { const rows=[]; snap.forEach(d=>rows.push({id:d.id, ...d.data()})); cb(rows); },
     err => { console.error(name, err); showToast('Could not load '+name+' — check your sign-in and connection.'); });
 }
+/* routineLog/choreLog are each scoped to "today" via a Firestore `where('date','==', todayISO())`
+   query built at subscribe time — a plain onSnapshot listener never re-runs its own query on its
+   own just because time passed, so these need to be torn down and re-subscribed with a fresh
+   todayISO() whenever the calendar day actually rolls over (see checkDayRollover below), not just
+   once at page load. reminderCompletions isn't date-scoped (it's a plain full-collection listener
+   like routines/chores), so it doesn't need this treatment. */
+let unsubRoutineLog = null, unsubChoreLog = null;
+function subscribeRoutineLog(){
+  if(!firebaseReady) return;
+  if(unsubRoutineLog) unsubRoutineLog();
+  unsubRoutineLog = db.collection('routineLog').where('date','==', todayISO()).onSnapshot(snap=>{
+    state.routineLog = {};
+    snap.forEach(doc=>{ const d=doc.data(); state.routineLog[`${d.date}_${d.routineId}_${d.memberId}`]=d.done; });
+    renderAll();
+  });
+}
+function subscribeChoreLog(){
+  if(!firebaseReady) return;
+  if(unsubChoreLog) unsubChoreLog();
+  unsubChoreLog = db.collection('choreLog').where('date','==', todayISO()).onSnapshot(snap=>{
+    state.choreLog = {};
+    snap.forEach(doc=>{ const d=doc.data(); state.choreLog[`${d.date}_${d.choreId}`]=d.done; });
+    renderAll();
+  });
+}
 function initFirestoreListeners(){
   if(listenersStarted) return; listenersStarted = true;
   watchCollection('family', rows => { state.family = rows.sort((a,b)=>(a.order||0)-(b.order||0)); renderAll(); });
@@ -416,22 +435,14 @@ function initFirestoreListeners(){
   });
   watchCollection('earnings', rows => { state.earnings = rows; renderAll(); });
   watchCollection('reminders', rows => { state.reminders = rows; renderAll(); });
-  watchCollection('recurringReminders', rows => { state.recurringReminders = rows; renderAll(); });
-  db.collection('routineLog').where('date','==', todayISO()).onSnapshot(snap=>{
-    state.routineLog = {};
-    snap.forEach(doc=>{ const d=doc.data(); state.routineLog[`${d.date}_${d.routineId}_${d.memberId}`]=d.done; });
+  watchCollection('recurringReminders', rows => { state.recurringReminders = rows; renderAll(); }); // legacy, read-only — see normalizeLegacyRecurringReminder
+  watchCollection('reminderCompletions', rows => {
+    state.reminderCompletions = {};
+    rows.forEach(r => state.reminderCompletions[`${r.reminderId}_${r.occurrenceDate}`] = r);
     renderAll();
   });
-  db.collection('recurringReminderLog').where('date','==', todayISO()).onSnapshot(snap=>{
-    state.recurringReminderLog = {};
-    snap.forEach(doc=>{ const d=doc.data(); state.recurringReminderLog[`${d.date}_${d.reminderId}`]=d.done; });
-    renderAll();
-  });
-  db.collection('choreLog').where('date','==', todayISO()).onSnapshot(snap=>{
-    state.choreLog = {};
-    snap.forEach(doc=>{ const d=doc.data(); state.choreLog[`${d.date}_${d.choreId}`]=d.done; });
-    renderAll();
-  });
+  subscribeRoutineLog();
+  subscribeChoreLog();
   db.collection('settings').doc('main').onSnapshot(doc=>{
     if(doc.exists) state.settings = Object.assign({payPeriodAnchor:null,payPeriodType:'biweekly',workEmailTo:'',everyoneColor:'#3A362C',everyoneTextColor:'#FFFFFF'}, doc.data());
     renderAll();
@@ -722,57 +733,104 @@ function recurrenceLabel(evt){
 }
 
 /* ============================== TODAY TAB ============================== */
+/* A reminder is either scheduleType 'none' (one-time, due on its own `date`) or a recurring
+   pattern reusing the exact same shape as events (`recurrence`/`weeklyDays`/`weeklyInterval`,
+   `date` as the pattern's anchor) — see openReminderModal. Unlike routines/chores, a reminder
+   doesn't reset every day it's due: once due, it stays outstanding on the Reminders list across
+   as many days as it takes, until checked off — then it clears starting the next day (see
+   reminderDueOnOrBefore/toggleReminder). Legacy docs from before this existed are read through
+   the same never-migrated fallback pattern as everywhere else in this app: a plain manual
+   reminder (`{text, done, order}`, no date/recurrence at all) is always due; a doc from the old
+   `recurringReminders` collection (`{text, schedule:'daily'|'weekday'|'weekend'}`) is normalized
+   to a weekly pattern anchored to a fixed past date, so it keeps recurring exactly as before. */
+function normalizeLegacyRecurringReminder(r){
+  return { id:r.id, text:r.text, date:'2020-01-01', recurrence:'weekly',
+    weeklyDays: daysArrayForSchedule(r.schedule), weeklyInterval:1, order:r.order, _legacySource:'recurringReminders' };
+}
+function allReminders(){
+  return state.reminders.concat(state.recurringReminders.map(normalizeLegacyRecurringReminder));
+}
+function findReminderById(id){ return allReminders().find(r=>r.id===id); }
+function reminderDueOnOrBefore(reminder, dateISO){
+  if(reminder.date == null && !reminder.recurrence) return dateISO; // legacy manual reminder - always due
+  if(!reminder.date || reminder.date > dateISO) return null; // not scheduled yet
+  if(!reminder.recurrence || reminder.recurrence === 'none') return reminder.date;
+  const pseudoEvt = { date: reminder.date, recurrence: reminder.recurrence, weeklyDays: reminder.weeklyDays, weeklyInterval: reminder.weeklyInterval };
+  const anchor = new Date(reminder.date+'T00:00:00');
+  const d = new Date(dateISO+'T00:00:00');
+  for(let i=0; i<400 && d>=anchor; i++){
+    const iso = isoOf(d);
+    if(eventOccursOnDate(pseudoEvt, iso)) return iso;
+    d.setDate(d.getDate()-1);
+  }
+  return null;
+}
+function reminderRecurrenceSummary(reminder){
+  return (reminder.recurrence && reminder.recurrence !== 'none') ? recurrenceLabel(reminder) : '';
+}
 function renderReminders(){
   const el = document.getElementById('reminderList');
-  const recurringTodaySource = state.recurringReminders.slice().sort(byOrder).filter(appliesToday);
-  const recurringToday = recurringTodaySource.map(r=>({
-    id: 'rr_'+r.id, sourceId: r.id, text: r.text, recurring: true,
-    done: !!state.recurringReminderLog[`${todayISO()}_${r.id}`]
-  }));
-  const sortedManual = state.reminders.slice().sort(byOrder);
-  const manual = sortedManual.map(r=> ({ ...r, recurring:false }));
-  const all = [...recurringToday, ...manual];
-  if(!all.length){ el.innerHTML = '<div class="empty-note">Nothing on the list.</div>'; return; }
-  el.innerHTML = all.map(r=>`
+  const today = todayISO();
+  const withStatus = allReminders().map(r=>{
+    const due = reminderDueOnOrBefore(r, today);
+    if(!due) return null;
+    const completion = state.reminderCompletions[`${r.id}_${due}`];
+    if(completion && completion.completedDate < today) return null; // checked off on an earlier day - cleared overnight
+    return { r, due, done: !!(completion && completion.completedDate === today) };
+  }).filter(Boolean).sort((a,b)=>(a.r.order||0)-(b.r.order||0));
+  if(!withStatus.length){ el.innerHTML = '<div class="empty-note">Nothing on the list.</div>'; return; }
+  const sortedReminders = withStatus.map(x=>x.r);
+  el.innerHTML = withStatus.map(({r,due,done})=>`
     <div class="reminder-item">
-      <div class="check-btn ${r.done?'done':''}" data-rem-toggle="${r.id}" data-recurring="${r.recurring}" data-source="${r.sourceId||''}">${r.done?'✓':''}</div>
-      <div class="item-label" style="${r.done?'text-decoration:line-through;color:var(--ink-soft);':''}">${esc(r.text)}${r.recurring?' <span title="repeats" style="font-size:11px;color:var(--ink-soft);">↻</span>':''}</div>
-      ${r.recurring ? moveArrowsHtml('recurringReminders', recurringTodaySource, r.sourceId) : moveArrowsHtml('reminders', sortedManual, r.id)}
-      ${r.recurring?'':`<button class="del-x" data-rem-del="${r.id}">✕</button>`}
+      <div class="check-btn ${done?'done':''}" data-rem-toggle="${r.id}" data-due="${due}">${done?'✓':''}</div>
+      <div class="item-label" style="${done?'text-decoration:line-through;color:var(--ink-soft);':''}">${esc(r.text)}${reminderRecurrenceSummary(r)?` <span title="${esc(reminderRecurrenceSummary(r))}" style="font-size:11px;color:var(--ink-soft);">↻</span>`:''}</div>
+      ${moveArrowsHtml('reminders', sortedReminders, r.id)}
+      <button class="small-btn" data-rem-edit="${r.id}">Edit</button>
+      <button class="del-x" data-rem-del="${r.id}">✕</button>
     </div>`).join('');
-  wireMoveArrows(el, { recurringReminders: recurringTodaySource, reminders: sortedManual });
-  el.querySelectorAll('[data-rem-toggle]').forEach(btn=> btn.addEventListener('click', ()=>{
-    if(btn.dataset.recurring === 'true'){
-      const key = `${todayISO()}_${btn.dataset.source}`;
-      const newVal = !state.recurringReminderLog[key];
-      state.recurringReminderLog[key] = newVal;
-      renderReminders();
-      if(firebaseReady) dbWrite(db.collection('recurringReminderLog').doc(key).set({date:todayISO(), reminderId:btn.dataset.source, done:newVal}));
-      return;
-    }
-    const r = state.reminders.find(x=>x.id===btn.dataset.remToggle); if(!r) return;
-    r.done = !r.done; renderAll();
-    if(firebaseReady) dbWrite(db.collection('reminders').doc(r.id).update({done:r.done}));
-  }));
-  el.querySelectorAll('[data-rem-del]').forEach(btn=> btn.addEventListener('click', ()=> removeDoc('reminders', btn.dataset.remDel)));
+  wireMoveArrows(el, { reminders: sortedReminders });
+  el.querySelectorAll('[data-rem-toggle]').forEach(btn=> btn.addEventListener('click', ()=> toggleReminder(btn.dataset.remToggle, btn.dataset.due)));
+  el.querySelectorAll('[data-rem-edit]').forEach(btn=> btn.addEventListener('click', ()=> openReminderModal(findReminderById(btn.dataset.remEdit))));
+  el.querySelectorAll('[data-rem-del]').forEach(btn=> btn.addEventListener('click', ()=> deleteReminder(btn.dataset.remDel)));
 }
-document.getElementById('addReminderBtn').addEventListener('click', ()=>{
-  const modalRoot = document.getElementById('modalRoot');
-  modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">
-    <button class="close-x" id="closeModal">✕</button><h3>Add reminder</h3>
-    <div class="field"><label>What's the reminder?</label><input type="text" id="remText" placeholder="Send in field trip form"></div>
-    <div class="modal-actions"><button class="btn btn-primary" id="remSave">Save</button><button class="btn btn-secondary" id="remCancel">Cancel</button></div>
-  </div></div>`;
-  document.getElementById('closeModal').addEventListener('click', closeModal);
-  document.getElementById('remCancel').addEventListener('click', closeModal);
-  document.getElementById('backdrop').addEventListener('click', e=>{ if(e.target.id==='backdrop') closeModal(); });
-  document.getElementById('remSave').addEventListener('click', ()=>{
-    const text = document.getElementById('remText').value.trim(); if(!text) return;
-    const data = { text, done:false, order: state.reminders.length };
-    if(firebaseReady) dbWrite(db.collection('reminders').add(data)); else state.reminders.push({id:uid('local'), ...data});
-    renderAll(); closeModal();
-  });
-});
+function deleteReminder(id){
+  const r = findReminderById(id);
+  if(!r) return;
+  removeDoc(r._legacySource === 'recurringReminders' ? 'recurringReminders' : 'reminders', id);
+}
+/* Checking a reminder off logs its completion (keyed by which scheduled occurrence it satisfies,
+   so a recurring reminder becomes outstanding again next time it's due) and drops a small
+   read/write calendar event on the day it was actually completed — found by title+date match
+   rather than a stored id, since the optimistic local id for a brand-new event gets superseded
+   by Firestore's real id as soon as the live listener catches up. */
+function toggleReminder(reminderId, due){
+  const reminder = findReminderById(reminderId);
+  if(!reminder) return;
+  const key = `${reminderId}_${due}`;
+  const today = todayISO();
+  const existing = state.reminderCompletions[key];
+  if(existing && existing.completedDate === today){
+    delete state.reminderCompletions[key];
+    const evt = state.events.find(e => e.allDay && e.date === existing.completedDate && e.title === '✓ '+reminder.text);
+    if(evt){
+      state.events = state.events.filter(e=>e.id!==evt.id);
+      if(firebaseReady && !String(evt.id).startsWith('local')) dbWrite(db.collection('events').doc(evt.id).delete());
+    }
+    renderAll();
+    if(firebaseReady) dbWrite(db.collection('reminderCompletions').doc(key).delete());
+  } else {
+    const compData = { reminderId, occurrenceDate: due, completedDate: today };
+    state.reminderCompletions[key] = { id:key, ...compData };
+    const evtData = { title:'✓ '+reminder.text, date:today, endDate:today, allDay:true, startTime:'', endTime:'', recurrence:'none', weeklyDays:null, weeklyInterval:null, birthYear:null, notes:'', assignees:[], workBlock:false, order:Date.now() };
+    state.events.push({ id: uid('local'), ...evtData });
+    renderAll();
+    if(firebaseReady){
+      dbWrite(db.collection('reminderCompletions').doc(key).set(compData));
+      dbWrite(db.collection('events').add(evtData));
+    }
+  }
+}
+document.getElementById('addReminderBtn').addEventListener('click', ()=> openReminderModal(null));
 const DAY_ABBR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function daysArrayForSchedule(schedule){
   if(schedule === 'weekday') return [1,2,3,4,5];
@@ -780,7 +838,7 @@ function daysArrayForSchedule(schedule){
   return [0,1,2,3,4,5,6]; // 'daily' or unset
 }
 function effectiveDays(r){
-  // Legacy fallback only (reminders, and routines saved before per-assignee days existed):
+  // Legacy fallback only (routines saved before per-assignee days existed):
   // a single shared days array, or the original daily/weekday/weekend `schedule` field.
   return Array.isArray(r.days) ? r.days : daysArrayForSchedule(r.schedule);
 }
@@ -791,7 +849,6 @@ function daysLabel(days){
   if([0,6].every(d=>set.has(d)) && [1,2,3,4,5].every(d=>!set.has(d))) return 'Weekends';
   return [0,1,2,3,4,5,6].filter(d=>set.has(d)).map(d=>DAY_ABBR[d]).join(', ') || 'Never';
 }
-function appliesToday(r){ return effectiveDays(r).includes(new Date().getDay()); }
 function effectiveDaysForMember(routine, memberId){
   // Each assignee can have their own day pattern on the same routine (e.g. one kid's bath
   // nights differ from another's) — perMemberDays[memberId] wins when set. Routines saved
@@ -1003,6 +1060,30 @@ let weekCursor = new Date();
 let dayCursor = new Date();
 function startOfWeek(d){ const nd=new Date(d); nd.setHours(0,0,0,0); nd.setDate(nd.getDate()-nd.getDay()); return nd; }
 
+/* A Home Screen tile can sit open for days without ever reloading (the self-update check only
+   reloads when the file *content* changes, not just because a day passed) — calCursor/
+   weekCursor/dayCursor are plain `let`s set once at page load and nothing else was moving them
+   forward, so Week/Day view (and Month view's own-month framing) could get stuck showing an old
+   date indefinitely, and the routineLog/choreLog listeners (each scoped to a
+   `where('date','==', todayISO())` query built at subscribe time) would keep watching the old
+   day forever too. This checks every minute whether the real calendar day has moved on and, only
+   for cursors that were actually showing what used to be "today" (never a date the user
+   deliberately navigated to), advances them and re-subscribes the day-scoped listeners. */
+let lastKnownToday = todayISO();
+function checkDayRollover(){
+  const nowToday = todayISO();
+  if(nowToday === lastKnownToday) return;
+  const oldToday = new Date(lastKnownToday+'T00:00:00');
+  if(isoOf(dayCursor) === lastKnownToday) dayCursor = new Date();
+  const weekStart = startOfWeek(weekCursor), weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate()+6);
+  if(oldToday >= weekStart && oldToday <= weekEnd) weekCursor = new Date();
+  if(calCursor.getFullYear()===oldToday.getFullYear() && calCursor.getMonth()===oldToday.getMonth()){ calCursor = new Date(); calCursor.setDate(1); }
+  lastKnownToday = nowToday;
+  subscribeRoutineLog(); subscribeChoreLog();
+  renderAll();
+}
+setInterval(checkDayRollover, 60*1000);
+
 function renderCalendar(){
   renderCalendarHeader();
   renderPersonFilter();
@@ -1099,6 +1180,7 @@ function renderMonthGrid(){
   }));
 }
 const TIME_GRID_HOUR_HEIGHT = 48; // px per hour in the Week/Day time grid (24h tall = 1152px, scrolls)
+const TIME_GRID_DEFAULT_SCROLL_HOUR = 5; // always open scrolled to ~5am, not tied to the current time
 function timeToMinutes(hhmm){ if(!hhmm) return 0; const [h,m] = hhmm.split(':').map(Number); return h*60+(m||0); }
 function hourLabel12(h){ const period = h>=12?'PM':'AM'; let hh=h%12; if(hh===0) hh=12; return `${hh} ${period}`; }
 function timedEventGeometry(e){
@@ -1203,10 +1285,10 @@ function renderTimeGrid(dates){
     openEventForEdit(pill && pill.dataset.eventId, col.dataset.date);
   }));
 
+  // Always open to the same 5am-ish start rather than drifting with the current time of day —
+  // the full 24h grid is still there via scroll for an early flight or a late event.
   const scrollEl = grid.querySelector('.time-grid-scroll');
-  const now = new Date();
-  const scrollToHour = dates.includes(today) ? Math.max(0, now.getHours()-2) : 7;
-  scrollEl.scrollTop = scrollToHour * TIME_GRID_HOUR_HEIGHT;
+  scrollEl.scrollTop = TIME_GRID_DEFAULT_SCROLL_HOUR * TIME_GRID_HOUR_HEIGHT;
 }
 function renderWeekGrid(){
   const start = startOfWeek(weekCursor);
@@ -1493,7 +1575,7 @@ function updateEvent(id, data){
   if(data.workBlock) sendWorkBlockEmail(data, 'ADD');
 }
 /* Single-occurrence override, keyed by the SAME composite-string-as-doc-id pattern as
-   routineLog/choreLog/recurringReminderLog (`${eventId}_${originalDate}`) rather than an
+   routineLog/choreLog/reminderCompletions (`${eventId}_${originalDate}`) rather than an
    auto-generated id, so saving is always a plain upsert with no need to look up whether a doc
    already exists first. `originalDate` is the occurrence's un-moved slot date, never the
    possibly-edited-in `date` field inside `data`. */
@@ -1792,36 +1874,83 @@ function openChoreModal(existing){
   });
   if(isEdit) document.getElementById('chDelete').addEventListener('click', ()=>{ removeDoc('chores', existing.id); closeModal(); });
 }
-function openRecurringReminderModal(existing){
+function openReminderModal(existing){
   const isEdit = !!existing;
   const modalRoot = document.getElementById('modalRoot');
+  const rec = isEdit ? (existing.recurrence || 'none') : 'none';
+  const weeklyDaysDefault = isEdit ? eventWeeklyDays(existing) : [new Date().getDay()];
+  const weeklyIntervalDefault = isEdit ? eventWeeklyInterval(existing) : 1;
+  const dateDefault = isEdit ? (existing.date || todayISO()) : todayISO();
   modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">
     <button class="close-x" id="closeModal">✕</button>
-    <h3>${isEdit?'Edit recurring reminder':'Add recurring reminder'}</h3>
-    <div class="field"><label>What's the reminder?</label><input type="text" id="rrText" placeholder="Water the plants" value="${isEdit?esc(existing.text):''}"></div>
-    <div class="field"><label>Which days</label><select id="rrSchedule">
-      <option value="daily" ${!isEdit||existing.schedule==='daily'?'selected':''}>Every day</option>
-      <option value="weekday" ${isEdit&&existing.schedule==='weekday'?'selected':''}>Weekdays only</option>
-      <option value="weekend" ${isEdit&&existing.schedule==='weekend'?'selected':''}>Weekends only</option>
-    </select></div>
+    <h3>${isEdit?'Edit reminder':'Add reminder'}</h3>
+    <div class="field"><label>What's the reminder?</label><input type="text" id="remText" placeholder="Replace the air filter" value="${isEdit?esc(existing.text):''}"></div>
+    <div class="field"><label>Repeats</label>
+      <select id="remRepeat">
+        <option value="none" ${rec==='none'?'selected':''}>One time</option>
+        <option value="weekly" ${rec==='weekly'?'selected':''}>Weekly</option>
+        <option value="monthly-date" ${rec==='monthly-date'?'selected':''}>Monthly (same date)</option>
+        <option value="monthly-weekday" ${rec==='monthly-weekday'?'selected':''}>Monthly (same weekday — "1st Tuesday")</option>
+        <option value="yearly" ${rec==='yearly'?'selected':''}>Every year</option>
+      </select>
+    </div>
+    <div class="field" id="remWeeklyField" style="${rec==='weekly'?'':'display:none;'}">
+      <label>Which days</label>
+      <div class="day-checkboxes" id="remWeeklyDays">
+        ${DAY_ABBR.map((abbr,d)=>`<label class="day-checkbox"><input type="checkbox" value="${d}" ${weeklyDaysDefault.includes(d)?'checked':''}>${abbr}</label>`).join('')}
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-weight:600;font-size:14px;color:var(--ink-soft);">Every
+        <input type="number" id="remWeeklyInterval" min="1" max="12" value="${weeklyIntervalDefault}" style="width:56px;padding:6px;border:1px solid var(--paper-line);border-radius:6px;">
+        week(s)</label>
+    </div>
+    <div class="field"><label id="remDateLabel">${rec==='none'?'Date':'Starts on'}</label><input type="date" id="remDate" value="${dateDefault}"></div>
     <div class="modal-actions">
-      <button class="btn btn-primary" id="rrSave">Save</button>
-      ${isEdit?'<button class="btn btn-danger" id="rrDelete">Remove</button>':''}
-      <button class="btn btn-secondary" id="rrCancel">Cancel</button>
+      <button class="btn btn-primary" id="remSave">Save</button>
+      ${isEdit?'<button class="btn btn-danger" id="remDelete">Remove</button>':''}
+      <button class="btn btn-secondary" id="remCancel">Cancel</button>
     </div>
   </div></div>`;
+  document.getElementById('remRepeat').addEventListener('change', (e)=>{
+    const v = e.target.value;
+    document.getElementById('remWeeklyField').style.display = v==='weekly' ? '' : 'none';
+    document.getElementById('remDateLabel').textContent = v==='none' ? 'Date' : 'Starts on';
+  });
   document.getElementById('closeModal').addEventListener('click', closeModal);
-  document.getElementById('rrCancel').addEventListener('click', closeModal);
+  document.getElementById('remCancel').addEventListener('click', closeModal);
   document.getElementById('backdrop').addEventListener('click', e=>{ if(e.target.id==='backdrop') closeModal(); });
-  document.getElementById('rrSave').addEventListener('click', ()=>{
-    const text = document.getElementById('rrText').value.trim();
+  document.getElementById('remSave').addEventListener('click', ()=>{
+    const text = document.getElementById('remText').value.trim();
     if(!text){ showToast('Name the reminder first.'); return; }
-    const data = { text, schedule: document.getElementById('rrSchedule').value };
-    if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('recurringReminders').doc(existing.id).update(data)); }
-    else { data.order = state.recurringReminders.length; if(firebaseReady) dbWrite(db.collection('recurringReminders').add(data)); else state.recurringReminders.push({id:uid('local'), ...data}); }
+    const dateVal = document.getElementById('remDate').value;
+    if(!dateVal){ showToast('Pick a date.'); return; }
+    const recurrence = document.getElementById('remRepeat').value;
+    let weeklyDays = null, weeklyInterval = null;
+    if(recurrence === 'weekly'){
+      weeklyDays = Array.from(modalRoot.querySelectorAll('#remWeeklyDays input:checked')).map(i=>parseInt(i.value,10));
+      if(!weeklyDays.length){ showToast('Pick at least one day for the weekly pattern.'); return; }
+      weeklyInterval = parseInt(document.getElementById('remWeeklyInterval').value, 10) || 1;
+      if(weeklyInterval < 1) weeklyInterval = 1;
+    }
+    const data = { text, date: dateVal, recurrence, weeklyDays, weeklyInterval };
+    if(isEdit && existing._legacySource === 'recurringReminders'){
+      // Legacy recurring reminders live in the old `recurringReminders` collection - editing one
+      // migrates it into the unified `reminders` collection instead of upgrading it in place,
+      // same transparent-upgrade-on-edit principle as elsewhere, just across two collections
+      // because this one predates the merge.
+      data.order = allReminders().length;
+      if(firebaseReady){ dbWrite(db.collection('reminders').add(data)); dbWrite(db.collection('recurringReminders').doc(existing.id).delete()); }
+      else state.reminders.push({id:uid('local'), ...data});
+      state.recurringReminders = state.recurringReminders.filter(r=>r.id!==existing.id);
+    } else if(isEdit){
+      Object.assign(existing, data);
+      if(firebaseReady) dbWrite(db.collection('reminders').doc(existing.id).update(data));
+    } else {
+      data.order = allReminders().length;
+      if(firebaseReady) dbWrite(db.collection('reminders').add(data)); else state.reminders.push({id:uid('local'), ...data});
+    }
     renderAll(); closeModal();
   });
-  if(isEdit) document.getElementById('rrDelete').addEventListener('click', ()=>{ removeDoc('recurringReminders', existing.id); closeModal(); });
+  if(isEdit) document.getElementById('remDelete').addEventListener('click', ()=>{ deleteReminder(existing.id); closeModal(); });
 }
 
 /* ============================== SETTINGS ============================== */
@@ -1868,19 +1997,6 @@ function renderSettings(){
   }).join('');
   cEl.querySelectorAll('[data-ch-edit]').forEach(btn=> btn.addEventListener('click', ()=> openChoreModal(state.chores.find(x=>x.id===btn.dataset.chEdit))));
   wireMoveArrows(cEl, { chores: sortedChores });
-
-  const sortedRecurringReminders = state.recurringReminders.slice().sort(byOrder);
-  const rrEl = document.getElementById('recurringReminderList');
-  rrEl.innerHTML = sortedRecurringReminders.map(r=>{
-    const scheduleLabel = r.schedule==='weekday'?'Weekdays':r.schedule==='weekend'?'Weekends':'Every day';
-    return `<div class="list-row">
-      <div class="grow"><strong>${esc(r.text)}</strong> <span class="status-pill">${scheduleLabel}</span></div>
-      ${moveArrowsHtml('recurringReminders', sortedRecurringReminders, r.id)}
-      <button class="small-btn" data-rr-edit="${r.id}">Edit</button>
-    </div>`;
-  }).join('');
-  rrEl.querySelectorAll('[data-rr-edit]').forEach(btn=> btn.addEventListener('click', ()=> openRecurringReminderModal(state.recurringReminders.find(x=>x.id===btn.dataset.rrEdit))));
-  wireMoveArrows(rrEl, { recurringReminders: sortedRecurringReminders });
 
   const everyoneColorInput = document.getElementById('everyoneColorInput');
   if(everyoneColorInput && document.activeElement !== everyoneColorInput) everyoneColorInput.value = state.settings.everyoneColor || '#3A362C';
@@ -1934,7 +2050,6 @@ function removeDoc(collection, id){
 document.getElementById('addFamilyBtn').addEventListener('click', ()=> openFamilyModal(null));
 document.getElementById('addRoutineBtn').addEventListener('click', ()=> openRoutineModal(null));
 document.getElementById('addChoreBtn').addEventListener('click', ()=> openChoreModal(null));
-document.getElementById('addRecurringReminderBtn').addEventListener('click', ()=> openRecurringReminderModal(null));
 document.getElementById('savePayoutBtn').addEventListener('click', ()=>{
   const data = Object.assign({}, state.settings, { payPeriodAnchor: document.getElementById('payAnchorInput').value || todayISO(), payPeriodType: document.getElementById('payTypeInput').value });
   state.settings = data;
