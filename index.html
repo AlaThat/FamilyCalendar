@@ -424,15 +424,24 @@ async function resolveHousehold(user){
 
 if(firebaseReady){
   auth.onAuthStateChanged(user=>{ if(user){ resolveHousehold(user); } else { showLogin(); } });
-  document.getElementById('loginBtn').addEventListener('click', ()=>{
+  document.getElementById('loginBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('loginBtn');
+    if(btn.disabled) return;
     const email = document.getElementById('loginEmail').value.trim();
     const pw = document.getElementById('loginPassword').value;
-    auth.signInWithEmailAndPassword(email, pw).catch(err=>{
+    btn.disabled = true; btn.textContent = 'Signing in…';
+    try{
+      await auth.signInWithEmailAndPassword(email, pw);
+    }catch(err){
       document.getElementById('loginError').textContent = 'Could not sign in — check the email and password.';
       console.error(err);
-    });
+    }finally{
+      btn.disabled = false; btn.textContent = 'Sign in';
+    }
   });
   document.getElementById('signupBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('signupBtn');
+    if(btn.disabled) return;
     const email = document.getElementById('loginEmail').value.trim();
     const pw = document.getElementById('loginPassword').value;
     const code = document.getElementById('signupCode').value.trim();
@@ -443,7 +452,11 @@ if(firebaseReady){
     // Firestore rules require a signed-in request to read inviteCodes, and there's no signed-in
     // user yet at the point this button is clicked. If redemption fails (bad/used code), the
     // just-created account is deleted again so a retry with a correct code isn't blocked by
-    // Firebase Auth's "email already in use" on the now-orphaned account.
+    // Firebase Auth's "email already in use" on the now-orphaned account. The button is disabled
+    // for the whole round-trip so a double-tap can't fire two concurrent redemptions of the same
+    // code — one would win and mark it used, making the other (or a too-fast retry) show "already
+    // used" for a code that was, from the user's perspective, never actually used yet.
+    btn.disabled = true; btn.textContent = 'Creating account…';
     let cred;
     try{
       cred = await auth.createUserWithEmailAndPassword(email, pw);
@@ -453,6 +466,7 @@ if(firebaseReady){
       errEl.textContent = 'Could not create account — ' + (err && err.message ? err.message : 'please try again.');
       console.error(err);
       if(cred && cred.user) cred.user.delete().catch(e2=> console.error('rollback delete failed', e2));
+      btn.disabled = false; btn.textContent = 'Create account';
     }
   });
   document.getElementById('toSignupLink').addEventListener('click', (e)=>{
@@ -492,10 +506,15 @@ if(firebaseReady){
     }
   });
   document.getElementById('setupJoinBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('setupJoinBtn');
+    if(btn.disabled) return;
     const code = document.getElementById('setupCode').value.trim();
     const errEl = document.getElementById('setupError');
     errEl.textContent = '';
     if(!code){ errEl.textContent = 'Enter an invite code.'; return; }
+    // Disabled for the round-trip so a double-tap can't fire two concurrent redemptions of the
+    // same code — see the matching note on signupBtn above.
+    btn.disabled = true; btn.textContent = 'Joining…';
     try{
       const user = auth.currentUser;
       state.householdId = await redeemInviteCode(code, user.uid, user.email);
@@ -504,6 +523,7 @@ if(firebaseReady){
     }catch(err){
       errEl.textContent = err && err.message ? err.message : 'Could not redeem that code.';
       console.error(err);
+      btn.disabled = false; btn.textContent = 'Continue';
     }
   });
 } else { showApp(); }
@@ -2257,21 +2277,38 @@ function removeDoc(collection, id){
   renderAll();
   if(firebaseReady) dbWrite(hdb(collection).doc(id).delete());
 }
-document.getElementById('genJoinCodeBtn').addEventListener('click', ()=>{
+document.getElementById('genJoinCodeBtn').addEventListener('click', async ()=>{
   if(!firebaseReady) return;
+  const btn = document.getElementById('genJoinCodeBtn');
+  if(btn.disabled) return;
+  btn.disabled = true;
   const code = genInviteCode();
-  dbWrite(db.collection('inviteCodes').doc(code).set({
-    type: 'join-household', joinHouseholdId: state.householdId, createdInHouseholdId: state.householdId,
-    used: false, usedByUid: null, createdByUid: auth.currentUser.uid, createdAt: new Date().toISOString()
-  }));
+  try{
+    await dbWrite(db.collection('inviteCodes').doc(code).set({
+      type: 'join-household', joinHouseholdId: state.householdId, createdInHouseholdId: state.householdId,
+      used: false, usedByUid: null, createdByUid: auth.currentUser.uid, createdAt: new Date().toISOString()
+    }));
+    // The list below updates live via the inviteCodes listener, but that's easy to miss if it's
+    // scrolled out of view — the toast is the actual confirmation, and gives the code to read off
+    // and share without hunting for it in the list.
+    showToast('New code to join this household: ' + code);
+  } catch(err){ /* dbWrite() already showed a failure toast */ }
+  finally { btn.disabled = false; }
 });
-document.getElementById('genNewHouseholdCodeBtn').addEventListener('click', ()=>{
+document.getElementById('genNewHouseholdCodeBtn').addEventListener('click', async ()=>{
   if(!firebaseReady) return;
+  const btn = document.getElementById('genNewHouseholdCodeBtn');
+  if(btn.disabled) return;
+  btn.disabled = true;
   const code = genInviteCode();
-  dbWrite(db.collection('inviteCodes').doc(code).set({
-    type: 'new-household', joinHouseholdId: null, createdInHouseholdId: state.householdId,
-    used: false, usedByUid: null, createdByUid: auth.currentUser.uid, createdAt: new Date().toISOString()
-  }));
+  try{
+    await dbWrite(db.collection('inviteCodes').doc(code).set({
+      type: 'new-household', joinHouseholdId: null, createdInHouseholdId: state.householdId,
+      used: false, usedByUid: null, createdByUid: auth.currentUser.uid, createdAt: new Date().toISOString()
+    }));
+    showToast('New code to start a household: ' + code);
+  } catch(err){ /* dbWrite() already showed a failure toast */ }
+  finally { btn.disabled = false; }
 });
 document.getElementById('addFamilyBtn').addEventListener('click', ()=> openFamilyModal(null));
 document.getElementById('addRoutineBtn').addEventListener('click', ()=> openRoutineModal(null));

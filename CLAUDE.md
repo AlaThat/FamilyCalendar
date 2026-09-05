@@ -119,6 +119,23 @@ thing you can do first — it will likely surface real bugs that were never actu
   already throws a readable error for a bad/used code); if redemption fails, the just-created
   account is rolled back (`cred.user.delete()`) so a retry with the right code doesn't hit "email
   already in use" against an orphaned account.
+- Every button added for the household/invite flow (`loginBtn`, `signupBtn`, `setupJoinBtn`,
+  `genJoinCodeBtn`, `genNewHouseholdCodeBtn`) fired its async Firestore/Auth call with no
+  disable-while-working guard and no visual feedback at all — inconsistent with `migrateLegacyBtn`,
+  which already did this correctly (`btn.disabled = true; btn.textContent = 'Migrating…'`). Two
+  real user-reported symptoms traced back to this single gap: (1) clicking "Generate a code" did
+  nothing visible, so the user clicked it repeatedly and only discovered 6 codes after a page
+  refresh — the list *does* update live via the `inviteCodes` listener, but with zero other
+  feedback that's easy to miss if it's scrolled out of view; (2) a friend redeeming a code hit
+  "That invite code has already been used" on a code that was, from their perspective, never used
+  yet, then a page refresh (i.e. a fresh, un-raced attempt) let the same code through — consistent
+  with an unguarded double-tap on "Continue" firing two concurrent `redeemInviteCode()` calls on
+  the same code, one of which wins and marks it used before the other's read settles. Fixed by
+  disabling every one of those buttons for the duration of its async call (matching
+  `migrateLegacyBtn`'s pattern) and having the two generate buttons `showToast()` the new code
+  immediately on success, so there's confirmation without needing to find the list. If either
+  symptom is reported again on a *new* button added to this flow, check for this same missing
+  guard before assuming something else broke.
 
 ## Multi-tenancy: households
 
