@@ -93,6 +93,18 @@ thing you can do first — it will likely surface real bugs that were never actu
   to `isoOf()`/`todayISO()` themselves — they now go through the same local-date math. If a
   "today" bug is ever reported again, check whether it's this class of issue before assuming
   it's something new: search for any stray `.toISOString()` reintroduced outside `localIsoOf()`.
+- `calCursor`/`weekCursor`/`dayCursor` (Month/Week/Day view navigation) are plain `let`s set once
+  at page load and nothing was ever moving them forward — a Home Screen tile left open for days
+  (the self-update check only reloads on a *file content* change, never just because a day
+  passed, see below) could get stuck showing an old date in Week/Day view indefinitely. Same
+  root problem for `routineLog`/`recurringReminderLog`/`choreLog`: each Firestore listener is
+  scoped with a `where('date','==', todayISO())` query built once at subscribe time, so it never
+  picks up a new day's docs on its own either. Fixed with `checkDayRollover()` (checked every
+  minute via `setInterval`): advances a cursor only if it was actually showing what used to be
+  "today" (never a date the user deliberately navigated to), and re-subscribes the three
+  day-scoped listeners via `subscribeRoutineLog()`/`subscribeRecurringReminderLog()`/
+  `subscribeChoreLog()`. If a "stuck on an old date" bug is ever reported again, check this
+  mechanism before assuming something new broke.
 
 ## Data model (Firestore collections)
 
@@ -267,10 +279,13 @@ order. Overlapping timed events are packed into side-by-side columns by `packTim
 standard interval-packing sweep (sort by start time, reuse a column once its previous occupant
 has ended, open a new one otherwise, grouped into clusters of mutually-touching events so an
 unrelated event later in the day isn't forced to share column width with an earlier cluster).
-Today's column gets a `.now-line` current-time indicator; the grid's default scroll position is
-"now minus 2 hours" if today is in view, else 7 AM, so opening the view doesn't dump you at
-midnight. Month view is untouched by any of this — it stays the compact multi-week grid it always
-was, matching how Outlook's own Month view also doesn't show a time grid.
+Today's column gets a `.now-line` current-time indicator; the grid always opens scrolled to
+`TIME_GRID_DEFAULT_SCROLL_HOUR` (5 AM) rather than drifting with the current time of day — it
+was originally "now minus 2 hours," but that made the view feel inconsistent, jumping to a
+different spot depending on what time you happened to open it. The full 24h grid is still there
+via scroll either direction for an early flight or a late event. Month view is untouched by any
+of this — it stays the compact multi-week grid it always was, matching how Outlook's own Month
+view also doesn't show a time grid.
 
 ## Design language (established, keep consistent)
 

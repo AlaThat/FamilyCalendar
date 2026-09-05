@@ -403,6 +403,39 @@ function watchCollection(name, cb){
   db.collection(name).onSnapshot(snap => { const rows=[]; snap.forEach(d=>rows.push({id:d.id, ...d.data()})); cb(rows); },
     err => { console.error(name, err); showToast('Could not load '+name+' — check your sign-in and connection.'); });
 }
+/* routineLog/recurringReminderLog/choreLog are each scoped to "today" via a Firestore
+   `where('date','==', todayISO())` query built at subscribe time — a plain onSnapshot listener
+   never re-runs its own query on its own just because time passed, so these need to be torn down
+   and re-subscribed with a fresh todayISO() whenever the calendar day actually rolls over (see
+   checkDayRollover below), not just once at page load. */
+let unsubRoutineLog = null, unsubRecurringReminderLog = null, unsubChoreLog = null;
+function subscribeRoutineLog(){
+  if(!firebaseReady) return;
+  if(unsubRoutineLog) unsubRoutineLog();
+  unsubRoutineLog = db.collection('routineLog').where('date','==', todayISO()).onSnapshot(snap=>{
+    state.routineLog = {};
+    snap.forEach(doc=>{ const d=doc.data(); state.routineLog[`${d.date}_${d.routineId}_${d.memberId}`]=d.done; });
+    renderAll();
+  });
+}
+function subscribeRecurringReminderLog(){
+  if(!firebaseReady) return;
+  if(unsubRecurringReminderLog) unsubRecurringReminderLog();
+  unsubRecurringReminderLog = db.collection('recurringReminderLog').where('date','==', todayISO()).onSnapshot(snap=>{
+    state.recurringReminderLog = {};
+    snap.forEach(doc=>{ const d=doc.data(); state.recurringReminderLog[`${d.date}_${d.reminderId}`]=d.done; });
+    renderAll();
+  });
+}
+function subscribeChoreLog(){
+  if(!firebaseReady) return;
+  if(unsubChoreLog) unsubChoreLog();
+  unsubChoreLog = db.collection('choreLog').where('date','==', todayISO()).onSnapshot(snap=>{
+    state.choreLog = {};
+    snap.forEach(doc=>{ const d=doc.data(); state.choreLog[`${d.date}_${d.choreId}`]=d.done; });
+    renderAll();
+  });
+}
 function initFirestoreListeners(){
   if(listenersStarted) return; listenersStarted = true;
   watchCollection('family', rows => { state.family = rows.sort((a,b)=>(a.order||0)-(b.order||0)); renderAll(); });
@@ -417,21 +450,9 @@ function initFirestoreListeners(){
   watchCollection('earnings', rows => { state.earnings = rows; renderAll(); });
   watchCollection('reminders', rows => { state.reminders = rows; renderAll(); });
   watchCollection('recurringReminders', rows => { state.recurringReminders = rows; renderAll(); });
-  db.collection('routineLog').where('date','==', todayISO()).onSnapshot(snap=>{
-    state.routineLog = {};
-    snap.forEach(doc=>{ const d=doc.data(); state.routineLog[`${d.date}_${d.routineId}_${d.memberId}`]=d.done; });
-    renderAll();
-  });
-  db.collection('recurringReminderLog').where('date','==', todayISO()).onSnapshot(snap=>{
-    state.recurringReminderLog = {};
-    snap.forEach(doc=>{ const d=doc.data(); state.recurringReminderLog[`${d.date}_${d.reminderId}`]=d.done; });
-    renderAll();
-  });
-  db.collection('choreLog').where('date','==', todayISO()).onSnapshot(snap=>{
-    state.choreLog = {};
-    snap.forEach(doc=>{ const d=doc.data(); state.choreLog[`${d.date}_${d.choreId}`]=d.done; });
-    renderAll();
-  });
+  subscribeRoutineLog();
+  subscribeRecurringReminderLog();
+  subscribeChoreLog();
   db.collection('settings').doc('main').onSnapshot(doc=>{
     if(doc.exists) state.settings = Object.assign({payPeriodAnchor:null,payPeriodType:'biweekly',workEmailTo:'',everyoneColor:'#3A362C',everyoneTextColor:'#FFFFFF'}, doc.data());
     renderAll();
@@ -1003,6 +1024,30 @@ let weekCursor = new Date();
 let dayCursor = new Date();
 function startOfWeek(d){ const nd=new Date(d); nd.setHours(0,0,0,0); nd.setDate(nd.getDate()-nd.getDay()); return nd; }
 
+/* A Home Screen tile can sit open for days without ever reloading (the self-update check only
+   reloads when the file *content* changes, not just because a day passed) — calCursor/
+   weekCursor/dayCursor are plain `let`s set once at page load and nothing else was moving them
+   forward, so Week/Day view (and Month view's own-month framing) could get stuck showing an old
+   date indefinitely, and the routineLog/recurringReminderLog/choreLog listeners (each scoped to
+   a `where('date','==', todayISO())` query built at subscribe time) would keep watching the old
+   day forever too. This checks every minute whether the real calendar day has moved on and, only
+   for cursors that were actually showing what used to be "today" (never a date the user
+   deliberately navigated to), advances them and re-subscribes the day-scoped listeners. */
+let lastKnownToday = todayISO();
+function checkDayRollover(){
+  const nowToday = todayISO();
+  if(nowToday === lastKnownToday) return;
+  const oldToday = new Date(lastKnownToday+'T00:00:00');
+  if(isoOf(dayCursor) === lastKnownToday) dayCursor = new Date();
+  const weekStart = startOfWeek(weekCursor), weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate()+6);
+  if(oldToday >= weekStart && oldToday <= weekEnd) weekCursor = new Date();
+  if(calCursor.getFullYear()===oldToday.getFullYear() && calCursor.getMonth()===oldToday.getMonth()){ calCursor = new Date(); calCursor.setDate(1); }
+  lastKnownToday = nowToday;
+  subscribeRoutineLog(); subscribeRecurringReminderLog(); subscribeChoreLog();
+  renderAll();
+}
+setInterval(checkDayRollover, 60*1000);
+
 function renderCalendar(){
   renderCalendarHeader();
   renderPersonFilter();
@@ -1099,6 +1144,7 @@ function renderMonthGrid(){
   }));
 }
 const TIME_GRID_HOUR_HEIGHT = 48; // px per hour in the Week/Day time grid (24h tall = 1152px, scrolls)
+const TIME_GRID_DEFAULT_SCROLL_HOUR = 5; // always open scrolled to ~5am, not tied to the current time
 function timeToMinutes(hhmm){ if(!hhmm) return 0; const [h,m] = hhmm.split(':').map(Number); return h*60+(m||0); }
 function hourLabel12(h){ const period = h>=12?'PM':'AM'; let hh=h%12; if(hh===0) hh=12; return `${hh} ${period}`; }
 function timedEventGeometry(e){
@@ -1203,10 +1249,10 @@ function renderTimeGrid(dates){
     openEventForEdit(pill && pill.dataset.eventId, col.dataset.date);
   }));
 
+  // Always open to the same 5am-ish start rather than drifting with the current time of day —
+  // the full 24h grid is still there via scroll for an early flight or a late event.
   const scrollEl = grid.querySelector('.time-grid-scroll');
-  const now = new Date();
-  const scrollToHour = dates.includes(today) ? Math.max(0, now.getHours()-2) : 7;
-  scrollEl.scrollTop = scrollToHour * TIME_GRID_HOUR_HEIGHT;
+  scrollEl.scrollTop = TIME_GRID_DEFAULT_SCROLL_HOUR * TIME_GRID_HOUR_HEIGHT;
 }
 function renderWeekGrid(){
   const start = startOfWeek(weekCursor);
