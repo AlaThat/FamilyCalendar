@@ -497,6 +497,15 @@ hiding anyone's actual color. The "Everyone" label was renamed to "All" per user
 underlying concept/settings name (`everyoneColor`/`everyoneTextColor`, the "Everyone" event color
 block in Settings) is unchanged, only this one chip's display text changed.
 
+On a phone-width screen, the person-filter row (`.person-filter`) gets tighter chip padding/gap
+under the same `@media (max-width:640px)` breakpoint used elsewhere — a real report of the last
+chip wrapping onto its own line for an ordinary-size family (4-5 short-to-medium first names) once
+each chip carried real padding/font instead of the old plain-white unselected look. This is a
+"buys back a couple dozen pixels" fix, not a guarantee: a genuinely long name or a larger family
+can still wrap, and that's expected/fine — the scoping is deliberately phone-only (not the iPad
+wall display this app is mainly built for), since the iPad has plenty of width and there's no
+reason to shrink its tap targets.
+
 ## Design language (established, keep consistent)
 
 Paper-calendar aesthetic, not a SaaS dashboard — established deliberately per a design brief

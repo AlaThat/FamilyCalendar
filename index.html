@@ -183,7 +183,14 @@
   .login-box{ background:var(--white); border:1px solid var(--paper-line); border-radius:14px; padding:32px; width:100%; max-width:360px; }
   .login-box h1{ font-family:"Fraunces",serif; margin-top:0; }
 
-  @media (max-width: 640px){ main{ padding: 14px; } .cal-header h2{ font-size:22px; } .cal-title-group{ flex-basis:100%; } }
+  @media (max-width: 640px){ main{ padding: 14px; } .cal-header h2{ font-size:22px; } .cal-title-group{ flex-basis:100%; }
+    /* Tighter chip padding/gap on a phone-width screen so a typical set of names (a handful of
+       short-to-medium first names) has a real shot at fitting on one row instead of wrapping the
+       last chip onto its own line — genuinely long names/many people will still wrap, this just
+       buys back the couple dozen pixels that made the difference for an ordinary family size.
+       Scoped to phones only (not the iPad wall display this app is mainly built for) since iPads
+       have plenty of width and there's no reason to shrink tap targets there. */
+    .person-filter{ gap:6px; } .pf-chip{ padding:6px 10px; font-size:12px; } }
 </style>
 </head>
 <body>
