@@ -10,24 +10,102 @@ Your Firebase config is already in `index.html` (the keys you gave me — these 
    rules_version = '2';
    service cloud.firestore {
      match /databases/{database}/documents {
-       match /{document=**} {
-         allow read, write: if request.auth != null;
+       function signedIn() { return request.auth != null; }
+       function myHouseholdId() {
+         return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.householdId;
        }
+
+       // Routes a signed-in account to its household. Only that account can read/write its own
+       // routing doc — this is what every other rule below looks up to decide what you can see.
+       match /users/{uid} {
+         allow read, write: if signedIn() && request.auth.uid == uid;
+       }
+
+       // A household's own doc (name/owner) plus everything nested under it — family members,
+       // routines, chores, calendar events, reminders, settings, invite... everything the app
+       // stores day to day. Anyone whose users/{uid} doc points at this household can read/write
+       // all of it; nobody else can, even if they somehow learned the household's ID.
+       match /households/{householdId} {
+         allow read, update: if signedIn() && myHouseholdId() == householdId;
+         allow create: if signedIn();
+
+         match /{document=**} {
+           allow read, write: if signedIn() && myHouseholdId() == householdId;
+         }
+       }
+
+       // Invite codes gate creating a brand-new account (see "Inviting other people" below). Any
+       // signed-in account can generate one from Settings or redeem one when linking a new
+       // account to a household.
+       match /inviteCodes/{code} {
+         allow read, write: if signedIn();
+       }
+
+       // Marks whether the one-time upgrade from the old single-household version has already
+       // happened, so a second pre-existing login doesn't accidentally create a duplicate
+       // household — see "Upgrading from before households existed" below.
+       match /_migrationStatus/{doc} {
+         allow read, write: if signedIn();
+       }
+
+       // The OLD flat collections, from before households existed. Left readable/writable by any
+       // signed-in account only so the one-time migration step can still read them; the app
+       // itself never writes to these again once your household exists. Safe to delete this
+       // whole block (and the collections themselves, in the Firestore console) once you've
+       // confirmed your migrated household looks right.
+       match /family/{id} { allow read, write: if signedIn(); }
+       match /routines/{id} { allow read, write: if signedIn(); }
+       match /routineLog/{id} { allow read, write: if signedIn(); }
+       match /chores/{id} { allow read, write: if signedIn(); }
+       match /choreLog/{id} { allow read, write: if signedIn(); }
+       match /events/{id} { allow read, write: if signedIn(); }
+       match /eventExceptions/{id} { allow read, write: if signedIn(); }
+       match /earnings/{id} { allow read, write: if signedIn(); }
+       match /reminders/{id} { allow read, write: if signedIn(); }
+       match /recurringReminders/{id} { allow read, write: if signedIn(); }
+       match /reminderCompletions/{id} { allow read, write: if signedIn(); }
+       match /settings/{id} { allow read, write: if signedIn(); }
      }
    }
    ```
-   This means: only someone who's signed in (through the login screen you'll set up next) can read or write anything. Click **Publish**.
+   Click **Publish**.
 
-## 2. Create your two logins
+   **Important limitation, stated plainly:** the invite-code requirement is enforced by the app's
+   own sign-up screen, not by these rules or by Firebase Authentication itself — Email/Password
+   sign-up, once enabled below, accepts any email/password from anyone who has your public config
+   values (which, per the note below, are meant to be public). Someone technical enough to open
+   their browser's developer console could create a Firebase account and their own new household
+   directly, bypassing the invite-code screen entirely. This does **not** expose your family's
+   data — every household's data stays fully isolated by the rules above regardless of how the
+   account was created — it just means "invite-gated" is a soft, UI-level speed bump against
+   casual sign-ups right now, not a hard technical barrier. A hard barrier would need a server-side
+   check (a Cloud Function), which needs the paid Blaze plan — out of scope for this round, flag it
+   if it ever actually matters to you.
 
-The app now has a sign-in screen — no one can see or edit your family's data without an account you create.
+## 2. Create your login(s)
+
+The app has a sign-in screen — no one can see or edit any household's data without an account.
 
 1. Firebase console → **Build → Authentication → Get started**.
 2. Sign-in method tab → enable **Email/Password**.
-3. Users tab → **Add user** → create one for yourself and one for your husband (any email/password combo works, doesn't need to be a real inbox — e.g. `ala@ourweek.local`, though a real email is fine too).
-4. That's it. Whoever's signing in on a device (including the iPad, once) uses one of those two logins.
+3. Users tab → **Add user** → create a login for yourself (any email/password combo works, doesn't need to be a real inbox — e.g. `ala@ourweek.local`, though a real email is fine too).
+4. Sign in to the app with it. Since this is a brand-new account with no household yet, you'll land on a "One more step" screen — see the next section for what to do there depending on whether this is a fresh start or an upgrade from an existing calendar.
 
 **Note on the config keys you pasted:** Firebase's own docs confirm these are meant to be public — they identify your project, not grant access. Real access control is the Firestore Rules + login above. If you ever want to rotate them anyway (e.g. this conversation being public), you can generate a new web app in the same Firebase project and swap the values in `index.html` — the two are unrelated.
+
+## 2a. Upgrading from before households existed
+
+If you already had this app running with real data in it before this update, your very first sign-in afterward lands on "One more step" with a **Migrate my existing calendar** button (only shown because the app detected data sitting in the old flat collections). Click it once — it copies everything into a new household tied to your account and leaves the old data in place untouched as a backup (nothing is deleted).
+
+**Only click Migrate from ONE of your existing logins.** If you have two logins that both used the same old calendar (e.g. both parents), the second one should NOT click Migrate too — that would create a second, separate, duplicate household. Instead: after the first login finishes migrating, go to **Settings → Invites → Generate a code to join this household**, then sign in as the second login and enter that code on the "One more step" screen instead of migrating. (As a safety net, the Migrate button disappears for everyone once migration has happened once — but it's still worth doing it in the right order.)
+
+## 2b. Inviting other people (including onto a brand-new, blank household)
+
+Every new account needs a code — there's no open public sign-up. From **Settings → Invites**:
+- **Generate a code to join this household** — gives someone their own login that sees and edits the *same* calendar as you (e.g. the other parent, after the migration above).
+- **Generate a code to start a new household** — gives someone a completely blank, separate calendar of their own, invisible to you and vice versa (e.g. a friend who wants to try the app for their own family).
+
+Share the code with them however you'd share anything else (text, email — it's just an 8-character string, not sensitive on its own). They open the app, tap **"Have an invite code? Create an account,"** and enter their email, a password, and the code. Each code works once.
 
 ## 3. Put it online (free hosting)
 
@@ -36,7 +114,7 @@ The app now has a sign-in screen — no one can see or edit your family's data w
 3. Repo → **Settings → Pages** → source = main branch → save.
 4. You'll get a URL like `https://yourname.github.io/our-week/`.
 
-Since the repo is public, anyone can *see the code* — but per step 2, they can't see or touch your actual calendar data without one of the two logins you created. That's the intended split: code public, data private.
+Since the repo is public, anyone can *see the code* — but per step 1, they can't see or touch any household's actual calendar data without a real signed-in account for that household. That's the intended split: code public, data private.
 
 ## 4. Set up the iPad as a wall display
 
@@ -82,6 +160,7 @@ Trigger on subject `[FAMILYBLOCK-REMOVE]` → **Get calendar view of events (V3)
 
 ## What's built now
 
+- **Multiple households, fully separate** — every account belongs to exactly one household, and each household's calendar/routines/chores/reminders/settings are invisible to every other household. New accounts are invite-code-gated (Settings → Invites generates codes to join yours or start a brand-new blank one) rather than open public sign-up — see "Inviting other people" above.
 - **Bottom navigation**, month/week/day name as the primary on-screen headline — there's no top header or app-branding bar at all, to keep the whole screen for the calendar
 - **Month, Week, and Day views**, toggle at the top of Calendar
 - **Week and Day are an Outlook-style time grid** — all-day events pin to a row on top, timed events are positioned by their actual start/end time in a shared scrollable hour grid instead of just being listed in order, and overlapping events show side by side instead of stacking. Today's column shows a current-time line, and opening the view scrolls near "now" rather than dumping you at midnight.

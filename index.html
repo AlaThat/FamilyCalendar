@@ -169,11 +169,32 @@
 <div id="loginScreen" class="hidden">
   <div class="login-box">
     <h1>Our Week</h1>
-    <p style="color:var(--ink-soft);font-size:14px;">Sign in with the account created for your household.</p>
+    <p id="loginSubtitle" style="color:var(--ink-soft);font-size:14px;">Sign in with the account created for your household.</p>
     <div class="field"><label>Email</label><input type="email" id="loginEmail"></div>
     <div class="field"><label>Password</label><input type="password" id="loginPassword"></div>
+    <div class="field hidden" id="signupCodeField"><label>Invite code</label><input type="text" id="signupCode" placeholder="the code someone shared with you"></div>
     <div id="loginError" style="color:#B5342C;font-size:13px;margin-bottom:10px;"></div>
     <button class="btn btn-primary" id="loginBtn" style="width:100%;">Sign in</button>
+    <button class="btn btn-primary hidden" id="signupBtn" style="width:100%;">Create account</button>
+    <p style="text-align:center;margin-top:14px;font-size:13px;">
+      <a href="#" id="toSignupLink" style="color:var(--accent);">Have an invite code? Create an account</a>
+      <a href="#" id="toSigninLink" class="hidden" style="color:var(--accent);">Already have an account? Sign in</a>
+    </p>
+  </div>
+</div>
+
+<div id="householdSetupScreen" class="hidden">
+  <div class="login-box">
+    <h1>One more step</h1>
+    <p style="color:var(--ink-soft);font-size:14px;">This account isn't linked to a household yet.</p>
+    <div id="legacyMigrateBlock" class="hidden">
+      <p class="section-sub">We found an existing calendar from before households existed. Move it into a new household of your own?</p>
+      <button class="btn btn-primary" id="migrateLegacyBtn" style="width:100%;margin-bottom:14px;">Migrate my existing calendar</button>
+    </div>
+    <div class="field"><label>Invite code</label><input type="text" id="setupCode" placeholder="the code someone shared with you"></div>
+    <div id="setupError" style="color:#B5342C;font-size:13px;margin-bottom:10px;"></div>
+    <button class="btn btn-primary" id="setupJoinBtn" style="width:100%;">Continue</button>
+    <button class="btn btn-secondary" id="setupSignOutBtn" style="width:100%;margin-top:10px;">Sign out</button>
   </div>
 </div>
 
@@ -261,6 +282,13 @@
         <button class="btn btn-primary" id="saveWorkEmailBtn">Save</button>
       </div>
       <div class="settings-block">
+        <div class="section-title">Invites</div>
+        <p class="section-sub">Invite someone into this household, or give a friend a code to start their own separate one — accounts can only be created with a code from here.</p>
+        <button class="btn btn-secondary" id="genJoinCodeBtn">Generate a code to join this household</button>
+        <button class="btn btn-secondary" id="genNewHouseholdCodeBtn" style="margin-top:8px;">Generate a code to start a new household</button>
+        <div id="inviteCodesList" style="margin-top:12px;"></div>
+      </div>
+      <div class="settings-block">
         <div class="section-title">Account</div>
         <button class="btn btn-secondary" id="signOutBtn">Sign out</button>
       </div>
@@ -307,11 +335,95 @@ if(!firebaseReady){ document.getElementById('configWarning').classList.remove('h
 
 const ICONS = ['⭐','🛏️','🪥','🧸','🧹','🍽️','🐕','🐈','📚','👕','🗑️','🧺','🚗','🧦','🥣','🪟','🌱','🧴','🎒','✏️','🛁','🧻','🍎','🎂','🎉','✈️','🏖️','🏫','⚕️','💼','📅','❤️','🎄','🎃','🦃','🇺🇸','🕎'];
 
-function showLogin(){ document.getElementById('loginScreen').classList.remove('hidden'); document.getElementById('app').classList.add('hidden'); }
-function showApp(){ document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('app').classList.remove('hidden'); }
+function showLogin(){ document.getElementById('loginScreen').classList.remove('hidden'); document.getElementById('householdSetupScreen').classList.add('hidden'); document.getElementById('app').classList.add('hidden'); }
+function showHouseholdSetup(){ document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('householdSetupScreen').classList.remove('hidden'); document.getElementById('app').classList.add('hidden'); }
+function showApp(){ document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('householdSetupScreen').classList.add('hidden'); document.getElementById('app').classList.remove('hidden'); }
+
+/* ============================== HOUSEHOLDS / MULTI-TENANT AUTH ==============================
+   Every family's data lives under households/{householdId}/... (see hdb() above) so different
+   sign-ups can't see each other's calendars — the flat "any signed-in account sees everything"
+   model this app started with only ever worked because every account belonged to the same one
+   household. `users/{uid}` is the routing doc mapping a signed-in account to its household;
+   `households/{id}` and `inviteCodes/{code}` live outside any single household by definition.
+   Self-serve sign-up is invite-code-gated for now (see SETUP.md) rather than wide open, since
+   there's no payment/paywall yet to gate free accounts some other way — every new account,
+   whether starting its own household or joining an existing one, redeems a code that some
+   existing household member generated from Settings. The one path that does NOT need a code is
+   migrating a pre-households account's existing data (detectLegacyData/migrateLegacyDataIntoNewHousehold)
+   since that's converting data behind an already-legitimate, already-existing account. */
+function genInviteCode(){
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  return Array.from({length:8}, ()=> chars[Math.floor(Math.random()*chars.length)]).join('');
+}
+async function detectLegacyData(){
+  // A household that pre-dates households (this app's very first accounts) has more than one
+  // Firebase Auth login sharing the same root-level data — if BOTH of those accounts hit this
+  // "one more step" screen after the households upgrade, each would see the Migrate button and,
+  // if both clicked it, each would create its OWN new household as a duplicate copy of the same
+  // pre-households data. The _migrationStatus marker, written once migration actually succeeds,
+  // is checked here so the button disappears for everyone else afterward — a second pre-existing
+  // account should redeem a "join" invite code from the first instead, never migrate again.
+  const marker = await db.collection('_migrationStatus').doc('main').get();
+  if(marker.exists) return false;
+  const snap = await db.collection('family').limit(1).get();
+  return !snap.empty;
+}
+const LEGACY_ROOT_COLLECTIONS = ['family','routines','routineLog','chores','choreLog','events','eventExceptions','earnings','reminders','recurringReminders','reminderCompletions'];
+async function migrateLegacyDataIntoNewHousehold(uid, email){
+  const householdRef = db.collection('households').doc();
+  const householdId = householdRef.id;
+  await householdRef.set({ name:'My Household', ownerUid:uid, createdAt:new Date().toISOString() });
+  // users/{uid} must be linked to the new household BEFORE writing anything into its
+  // subcollections — the security rules authorize households/{id}/** writes by looking up the
+  // requester's OWN users/{uid}.householdId, so writing this doc last would make every write in
+  // the loop below get rejected as unauthorized (no linked household yet at write time).
+  await db.collection('users').doc(uid).set({ householdId, email });
+  for(const name of LEGACY_ROOT_COLLECTIONS){
+    const snap = await db.collection(name).get();
+    for(const doc of snap.docs){
+      await db.collection('households').doc(householdId).collection(name).doc(doc.id).set(doc.data());
+    }
+  }
+  const settingsDoc = await db.collection('settings').doc('main').get();
+  if(settingsDoc.exists) await db.collection('households').doc(householdId).collection('settings').doc('main').set(settingsDoc.data());
+  await db.collection('_migrationStatus').doc('main').set({ migrated:true, householdId, migratedByUid:uid, migratedAt:new Date().toISOString() });
+  // The old root-level docs are deliberately left in place (unread from now on) as a backup,
+  // not deleted — see CLAUDE.md. Safe to clear out by hand later once the new household checks out.
+  return householdId;
+}
+async function redeemInviteCode(code, uid, email){
+  const codeRef = db.collection('inviteCodes').doc(code);
+  const codeDoc = await codeRef.get();
+  if(!codeDoc.exists) throw new Error('That invite code was not found.');
+  const codeData = codeDoc.data();
+  if(codeData.used) throw new Error('That invite code has already been used.');
+  let householdId;
+  if(codeData.type === 'new-household'){
+    const householdRef = db.collection('households').doc();
+    householdId = householdRef.id;
+    await householdRef.set({ name:'My Household', ownerUid:uid, createdAt:new Date().toISOString() });
+  } else {
+    householdId = codeData.joinHouseholdId;
+  }
+  await db.collection('users').doc(uid).set({ householdId, email });
+  await codeRef.update({ used:true, usedByUid:uid });
+  return householdId;
+}
+async function resolveHousehold(user){
+  const doc = await db.collection('users').doc(user.uid).get();
+  if(doc.exists && doc.data().householdId){
+    state.householdId = doc.data().householdId;
+    showApp();
+    initFirestoreListeners();
+    return;
+  }
+  showHouseholdSetup();
+  const hasLegacy = await detectLegacyData();
+  document.getElementById('legacyMigrateBlock').classList.toggle('hidden', !hasLegacy);
+}
 
 if(firebaseReady){
-  auth.onAuthStateChanged(user=>{ if(user){ showApp(); initFirestoreListeners(); } else { showLogin(); } });
+  auth.onAuthStateChanged(user=>{ if(user){ resolveHousehold(user); } else { showLogin(); } });
   document.getElementById('loginBtn').addEventListener('click', ()=>{
     const email = document.getElementById('loginEmail').value.trim();
     const pw = document.getElementById('loginPassword').value;
@@ -320,15 +432,97 @@ if(firebaseReady){
       console.error(err);
     });
   });
+  document.getElementById('signupBtn').addEventListener('click', async ()=>{
+    const email = document.getElementById('loginEmail').value.trim();
+    const pw = document.getElementById('loginPassword').value;
+    const code = document.getElementById('signupCode').value.trim();
+    const errEl = document.getElementById('loginError');
+    errEl.textContent = '';
+    if(!code){ errEl.textContent = 'An invite code is required to create an account.'; return; }
+    // The invite code is validated by redeemInviteCode() AFTER the account exists, not before —
+    // Firestore rules require a signed-in request to read inviteCodes, and there's no signed-in
+    // user yet at the point this button is clicked. If redemption fails (bad/used code), the
+    // just-created account is deleted again so a retry with a correct code isn't blocked by
+    // Firebase Auth's "email already in use" on the now-orphaned account.
+    let cred;
+    try{
+      cred = await auth.createUserWithEmailAndPassword(email, pw);
+      await redeemInviteCode(code, cred.user.uid, email);
+      // onAuthStateChanged fires next and resolveHousehold() picks up the now-linked household.
+    }catch(err){
+      errEl.textContent = 'Could not create account — ' + (err && err.message ? err.message : 'please try again.');
+      console.error(err);
+      if(cred && cred.user) cred.user.delete().catch(e2=> console.error('rollback delete failed', e2));
+    }
+  });
+  document.getElementById('toSignupLink').addEventListener('click', (e)=>{
+    e.preventDefault();
+    document.getElementById('loginSubtitle').textContent = 'Create an account with an invite code someone shared with you.';
+    document.getElementById('signupCodeField').classList.remove('hidden');
+    document.getElementById('loginBtn').classList.add('hidden');
+    document.getElementById('signupBtn').classList.remove('hidden');
+    document.getElementById('toSignupLink').classList.add('hidden');
+    document.getElementById('toSigninLink').classList.remove('hidden');
+    document.getElementById('loginError').textContent = '';
+  });
+  document.getElementById('toSigninLink').addEventListener('click', (e)=>{
+    e.preventDefault();
+    document.getElementById('loginSubtitle').textContent = 'Sign in with the account created for your household.';
+    document.getElementById('signupCodeField').classList.add('hidden');
+    document.getElementById('loginBtn').classList.remove('hidden');
+    document.getElementById('signupBtn').classList.add('hidden');
+    document.getElementById('toSignupLink').classList.remove('hidden');
+    document.getElementById('toSigninLink').classList.add('hidden');
+    document.getElementById('loginError').textContent = '';
+  });
   document.getElementById('signOutBtn').addEventListener('click', ()=> auth.signOut());
+  document.getElementById('setupSignOutBtn').addEventListener('click', ()=> auth.signOut());
+  document.getElementById('migrateLegacyBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('migrateLegacyBtn');
+    btn.disabled = true; btn.textContent = 'Migrating…';
+    try{
+      const user = auth.currentUser;
+      state.householdId = await migrateLegacyDataIntoNewHousehold(user.uid, user.email);
+      showApp();
+      initFirestoreListeners();
+    }catch(err){
+      document.getElementById('setupError').textContent = 'Migration failed — ' + (err && err.message ? err.message : 'please try again.');
+      console.error(err);
+      btn.disabled = false; btn.textContent = 'Migrate my existing calendar';
+    }
+  });
+  document.getElementById('setupJoinBtn').addEventListener('click', async ()=>{
+    const code = document.getElementById('setupCode').value.trim();
+    const errEl = document.getElementById('setupError');
+    errEl.textContent = '';
+    if(!code){ errEl.textContent = 'Enter an invite code.'; return; }
+    try{
+      const user = auth.currentUser;
+      state.householdId = await redeemInviteCode(code, user.uid, user.email);
+      showApp();
+      initFirestoreListeners();
+    }catch(err){
+      errEl.textContent = err && err.message ? err.message : 'Could not redeem that code.';
+      console.error(err);
+    }
+  });
 } else { showApp(); }
 
 /* ---------------- State ---------------- */
 const state = {
+  householdId: null,
   family: [], routines: [], routineLog: {}, chores: [], choreLog: {}, earnings: [], events: [], eventExceptions: {}, reminders: [],
-  recurringReminders: [], reminderCompletions: {},
+  recurringReminders: [], reminderCompletions: {}, inviteCodes: [],
   settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '', everyoneColor: '#3A362C', everyoneTextColor: '#FFFFFF' }
 };
+/* Every family's data (family members, routines, events, etc.) lives under
+   households/{householdId}/{collectionName} — hdb() is the one place that builds that scoped
+   path, so every other function in this app still just says hdb('events') the same way it used
+   to say db.collection('events'), with no per-call-site awareness of households needed. Only the
+   `users` (uid -> householdId routing) and `households`/`inviteCodes` (household membership and
+   invite-code redemption) collections stay at the root — see the household setup / invite flow
+   below — since those exist *outside* any single household by definition. */
+function hdb(name){ return db.collection('households').doc(state.householdId).collection(name); }
 /* Local calendar date, not UTC — .toISOString() rolls over to the next date up to several hours
    before local midnight for any timezone behind UTC (e.g. ~5pm Pacific already reads as
    "tomorrow" in UTC), which was silently mis-dating everything keyed by "today": an evening
@@ -394,7 +588,7 @@ function dbWrite(promise){
 let listenersStarted = false;
 function watchCollection(name, cb){
   if(!firebaseReady) return;
-  db.collection(name).onSnapshot(snap => { const rows=[]; snap.forEach(d=>rows.push({id:d.id, ...d.data()})); cb(rows); },
+  hdb(name).onSnapshot(snap => { const rows=[]; snap.forEach(d=>rows.push({id:d.id, ...d.data()})); cb(rows); },
     err => { console.error(name, err); showToast('Could not load '+name+' — check your sign-in and connection.'); });
 }
 /* routineLog/choreLog are each scoped to "today" via a Firestore `where('date','==', todayISO())`
@@ -407,7 +601,7 @@ let unsubRoutineLog = null, unsubChoreLog = null;
 function subscribeRoutineLog(){
   if(!firebaseReady) return;
   if(unsubRoutineLog) unsubRoutineLog();
-  unsubRoutineLog = db.collection('routineLog').where('date','==', todayISO()).onSnapshot(snap=>{
+  unsubRoutineLog = hdb('routineLog').where('date','==', todayISO()).onSnapshot(snap=>{
     state.routineLog = {};
     snap.forEach(doc=>{ const d=doc.data(); state.routineLog[`${d.date}_${d.routineId}_${d.memberId}`]=d.done; });
     renderAll();
@@ -416,7 +610,7 @@ function subscribeRoutineLog(){
 function subscribeChoreLog(){
   if(!firebaseReady) return;
   if(unsubChoreLog) unsubChoreLog();
-  unsubChoreLog = db.collection('choreLog').where('date','==', todayISO()).onSnapshot(snap=>{
+  unsubChoreLog = hdb('choreLog').where('date','==', todayISO()).onSnapshot(snap=>{
     state.choreLog = {};
     snap.forEach(doc=>{ const d=doc.data(); state.choreLog[`${d.date}_${d.choreId}`]=d.done; });
     renderAll();
@@ -443,10 +637,14 @@ function initFirestoreListeners(){
   });
   subscribeRoutineLog();
   subscribeChoreLog();
-  db.collection('settings').doc('main').onSnapshot(doc=>{
+  hdb('settings').doc('main').onSnapshot(doc=>{
     if(doc.exists) state.settings = Object.assign({payPeriodAnchor:null,payPeriodType:'biweekly',workEmailTo:'',everyoneColor:'#3A362C',everyoneTextColor:'#FFFFFF'}, doc.data());
     renderAll();
   });
+  db.collection('inviteCodes').where('createdInHouseholdId','==', state.householdId).onSnapshot(snap=>{
+    state.inviteCodes = []; snap.forEach(d=> state.inviteCodes.push({id:d.id, ...d.data()}));
+    renderAll();
+  }, err=>{ console.error('inviteCodes', err); });
 }
 
 /* Generic placeholder data — only used if Firebase isn't connected */
@@ -814,10 +1012,10 @@ function toggleReminder(reminderId, due){
     const evt = state.events.find(e => e.allDay && e.date === existing.completedDate && e.title === '✓ '+reminder.text);
     if(evt){
       state.events = state.events.filter(e=>e.id!==evt.id);
-      if(firebaseReady && !String(evt.id).startsWith('local')) dbWrite(db.collection('events').doc(evt.id).delete());
+      if(firebaseReady && !String(evt.id).startsWith('local')) dbWrite(hdb('events').doc(evt.id).delete());
     }
     renderAll();
-    if(firebaseReady) dbWrite(db.collection('reminderCompletions').doc(key).delete());
+    if(firebaseReady) dbWrite(hdb('reminderCompletions').doc(key).delete());
   } else {
     const compData = { reminderId, occurrenceDate: due, completedDate: today };
     state.reminderCompletions[key] = { id:key, ...compData };
@@ -825,8 +1023,8 @@ function toggleReminder(reminderId, due){
     state.events.push({ id: uid('local'), ...evtData });
     renderAll();
     if(firebaseReady){
-      dbWrite(db.collection('reminderCompletions').doc(key).set(compData));
-      dbWrite(db.collection('events').add(evtData));
+      dbWrite(hdb('reminderCompletions').doc(key).set(compData));
+      dbWrite(hdb('events').add(evtData));
     }
   }
 }
@@ -917,7 +1115,7 @@ function toggleRoutine(routineId, memberId){
   const newVal = !state.routineLog[key];
   state.routineLog[key] = newVal;
   renderRoutineColumns();
-  if(firebaseReady) dbWrite(db.collection('routineLog').doc(key).set({date:todayISO(), routineId, memberId, done:newVal}));
+  if(firebaseReady) dbWrite(hdb('routineLog').doc(key).set({date:todayISO(), routineId, memberId, done:newVal}));
 }
 function renderChoreColumns(){
   const el = document.getElementById('choreColumns');
@@ -950,7 +1148,7 @@ function toggleChoreDone(choreId){
   const newVal = !state.choreLog[key];
   state.choreLog[key] = newVal;
   renderChoreColumns();
-  if(firebaseReady) dbWrite(db.collection('choreLog').doc(key).set({date:todayISO(), choreId, done:newVal}));
+  if(firebaseReady) dbWrite(hdb('choreLog').doc(key).set({date:todayISO(), choreId, done:newVal}));
 }
 
 /* ============================== CHORES / POOL / EARNINGS ============================== */
@@ -983,14 +1181,14 @@ function renderPool(){
       const choreId = btn.dataset.chore, action = btn.dataset.action;
       const c = state.chores.find(x=>x.id===choreId); if(!c) return;
       if(action==='claim'){ c.status='claimed'; c.claimedBy=btn.dataset.member;
-        if(firebaseReady) dbWrite(db.collection('chores').doc(choreId).update({status:'claimed', claimedBy:btn.dataset.member}));
+        if(firebaseReady) dbWrite(hdb('chores').doc(choreId).update({status:'claimed', claimedBy:btn.dataset.member}));
       } else if(action==='unclaim'){ c.status='open'; c.claimedBy=null;
-        if(firebaseReady) dbWrite(db.collection('chores').doc(choreId).update({status:'open', claimedBy:null}));
+        if(firebaseReady) dbWrite(hdb('chores').doc(choreId).update({status:'open', claimedBy:null}));
       } else if(action==='finish'){ c.status='done';
-        if(firebaseReady) dbWrite(db.collection('chores').doc(choreId).update({status:'done'}));
+        if(firebaseReady) dbWrite(hdb('chores').doc(choreId).update({status:'done'}));
         const earning = { memberId:c.claimedBy, amount:c.value||0, title:c.title, date:todayISO(), paid:false };
         state.earnings.push({id:uid('local'), ...earning});
-        if(firebaseReady) dbWrite(db.collection('earnings').add(earning));
+        if(firebaseReady) dbWrite(hdb('earnings').add(earning));
       }
       renderAll();
     });
@@ -1045,7 +1243,7 @@ function renderEarnings(){
       state.earnings.forEach(e=>{
         if(e.memberId===memberId && !e.paid && e.date>=startISO && e.date<=endISO){
           e.paid = true;
-          if(firebaseReady && !String(e.id).startsWith('local')) dbWrite(db.collection('earnings').doc(e.id).update({paid:true}));
+          if(firebaseReady && !String(e.id).startsWith('local')) dbWrite(hdb('earnings').doc(e.id).update({paid:true}));
         }
       });
       renderAll();
@@ -1561,7 +1759,7 @@ function saveEvent(evt){
   if(evt.workBlock) evt.tag = `FAMILYAPP-${evt.date}-${evt.title.replace(/\s+/g,'').slice(0,20)}-${Date.now()}`;
   state.events.push({ id: localId, ...evt });
   renderAll();
-  if(firebaseReady) dbWrite(db.collection('events').add(evt));
+  if(firebaseReady) dbWrite(hdb('events').add(evt));
   if(evt.workBlock) sendWorkBlockEmail(evt, 'ADD');
 }
 function updateEvent(id, data){
@@ -1571,7 +1769,7 @@ function updateEvent(id, data){
   if(data.workBlock) data.tag = `FAMILYAPP-${data.date}-${data.title.replace(/\s+/g,'').slice(0,20)}-${Date.now()}`;
   if(idx>-1) state.events[idx] = { ...old, ...data };
   renderAll();
-  if(firebaseReady && !String(id).startsWith('local')) dbWrite(db.collection('events').doc(id).update(data));
+  if(firebaseReady && !String(id).startsWith('local')) dbWrite(hdb('events').doc(id).update(data));
   if(data.workBlock) sendWorkBlockEmail(data, 'ADD');
 }
 /* Single-occurrence override, keyed by the SAME composite-string-as-doc-id pattern as
@@ -1589,7 +1787,7 @@ function saveEventException(eventId, originalDate, data){
   const exData = { eventId, date: originalDate, deleted: false, overrides: data };
   state.eventExceptions[key] = { id: key, ...exData };
   renderAll();
-  if(firebaseReady) dbWrite(db.collection('eventExceptions').doc(key).set(exData));
+  if(firebaseReady) dbWrite(hdb('eventExceptions').doc(key).set(exData));
   if(data.workBlock) sendWorkBlockEmail(data, 'ADD');
 }
 function deleteEventOccurrence(eventId, originalDate, dayIso){
@@ -1601,7 +1799,7 @@ function deleteEventOccurrence(eventId, originalDate, dayIso){
   const exData = { eventId, date: originalDate, deleted: true };
   state.eventExceptions[key] = { id: key, ...exData };
   renderAll();
-  if(firebaseReady) dbWrite(db.collection('eventExceptions').doc(key).set(exData));
+  if(firebaseReady) dbWrite(hdb('eventExceptions').doc(key).set(exData));
   openDayModal(dayIso);
 }
 function moveEventOrder(id, dayIso, direction){
@@ -1618,7 +1816,7 @@ function moveEventOrder(id, dayIso, direction){
   reordered.forEach((evt, i)=>{
     const stateIdx = state.events.findIndex(x=>x.id===evt.id);
     if(stateIdx>-1) state.events[stateIdx].order = i;
-    if(firebaseReady && !String(evt.id).startsWith('local')) dbWrite(db.collection('events').doc(evt.id).update({order:i}));
+    if(firebaseReady && !String(evt.id).startsWith('local')) dbWrite(hdb('events').doc(evt.id).update({order:i}));
   });
   renderAll();
   openDayModal(dayIso);
@@ -1634,8 +1832,8 @@ function deleteEvent(id, dayIso){
   const exceptionKeys = Object.keys(state.eventExceptions).filter(k => state.eventExceptions[k].eventId === id);
   exceptionKeys.forEach(k => delete state.eventExceptions[k]);
   if(firebaseReady){
-    if(!String(id).startsWith('local')) dbWrite(db.collection('events').doc(id).delete());
-    exceptionKeys.forEach(k => dbWrite(db.collection('eventExceptions').doc(k).delete()));
+    if(!String(id).startsWith('local')) dbWrite(hdb('events').doc(id).delete());
+    exceptionKeys.forEach(k => dbWrite(hdb('eventExceptions').doc(k).delete()));
   }
   if(evt && evt.workBlock) sendWorkBlockEmail(evt, 'REMOVE');
   renderCalendar();
@@ -1680,8 +1878,8 @@ function openFamilyModal(existing){
     const name = document.getElementById('famName').value.trim();
     if(!name){ showToast('Name it first.'); return; }
     const data = { name, role: document.getElementById('famRole').value, color: document.getElementById('famColor').value, textColor: document.getElementById('famTextColor').value };
-    if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('family').doc(existing.id).update(data)); }
-    else { data.order = state.family.length; if(firebaseReady) dbWrite(db.collection('family').add(data)); else state.family.push({id:uid('local'), ...data}); }
+    if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(hdb('family').doc(existing.id).update(data)); }
+    else { data.order = state.family.length; if(firebaseReady) dbWrite(hdb('family').add(data)); else state.family.push({id:uid('local'), ...data}); }
     renderAll(); closeModal();
   });
   if(isEdit) document.getElementById('famDelete').addEventListener('click', ()=>{ removeDoc('family', existing.id); closeModal(); });
@@ -1753,8 +1951,8 @@ function openRoutineModal(existing){
       perMemberDays[id] = days;
     }
     const data = { title, icon: document.getElementById('rtIcon').value.trim()||'⭐', timeOfDay: document.getElementById('rtTimeOfDay').value, assignedTo, perMemberDays };
-    if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('routines').doc(existing.id).update(data)); }
-    else { data.order = state.routines.length; if(firebaseReady) dbWrite(db.collection('routines').add(data)); else state.routines.push({id:uid('local'), ...data}); }
+    if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(hdb('routines').doc(existing.id).update(data)); }
+    else { data.order = state.routines.length; if(firebaseReady) dbWrite(hdb('routines').add(data)); else state.routines.push({id:uid('local'), ...data}); }
     renderAll(); closeModal();
   });
   if(isEdit) document.getElementById('rtDelete').addEventListener('click', ()=>{ removeDoc('routines', existing.id); closeModal(); });
@@ -1868,8 +2066,8 @@ function openChoreModal(existing){
         data.perMemberDays = perMemberDays;
       }
     }
-    if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(db.collection('chores').doc(existing.id).update(data)); }
-    else { data.order = state.chores.length; if(firebaseReady) dbWrite(db.collection('chores').add(data)); else state.chores.push({id:uid('local'), ...data}); }
+    if(isEdit){ Object.assign(existing, data); if(firebaseReady) dbWrite(hdb('chores').doc(existing.id).update(data)); }
+    else { data.order = state.chores.length; if(firebaseReady) dbWrite(hdb('chores').add(data)); else state.chores.push({id:uid('local'), ...data}); }
     renderAll(); closeModal();
   });
   if(isEdit) document.getElementById('chDelete').addEventListener('click', ()=>{ removeDoc('chores', existing.id); closeModal(); });
@@ -1938,15 +2136,15 @@ function openReminderModal(existing){
       // same transparent-upgrade-on-edit principle as elsewhere, just across two collections
       // because this one predates the merge.
       data.order = allReminders().length;
-      if(firebaseReady){ dbWrite(db.collection('reminders').add(data)); dbWrite(db.collection('recurringReminders').doc(existing.id).delete()); }
+      if(firebaseReady){ dbWrite(hdb('reminders').add(data)); dbWrite(hdb('recurringReminders').doc(existing.id).delete()); }
       else state.reminders.push({id:uid('local'), ...data});
       state.recurringReminders = state.recurringReminders.filter(r=>r.id!==existing.id);
     } else if(isEdit){
       Object.assign(existing, data);
-      if(firebaseReady) dbWrite(db.collection('reminders').doc(existing.id).update(data));
+      if(firebaseReady) dbWrite(hdb('reminders').doc(existing.id).update(data));
     } else {
       data.order = allReminders().length;
-      if(firebaseReady) dbWrite(db.collection('reminders').add(data)); else state.reminders.push({id:uid('local'), ...data});
+      if(firebaseReady) dbWrite(hdb('reminders').add(data)); else state.reminders.push({id:uid('local'), ...data});
     }
     renderAll(); closeModal();
   });
@@ -2013,6 +2211,18 @@ function renderSettings(){
   if(typeInput && document.activeElement !== typeInput) typeInput.value = state.settings.payPeriodType || 'biweekly';
   const workEmailInput = document.getElementById('workEmailInput');
   if(workEmailInput && document.activeElement !== workEmailInput) workEmailInput.value = state.settings.workEmailTo || '';
+
+  const icEl = document.getElementById('inviteCodesList');
+  if(icEl){
+    const sortedCodes = state.inviteCodes.slice().sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+    icEl.innerHTML = sortedCodes.length ? sortedCodes.map(c=>`
+      <div class="list-row">
+        <div class="grow"><strong style="font-family:monospace;letter-spacing:1px;">${esc(c.id)}</strong>
+          <span class="status-pill">${c.type==='new-household'?'starts a new household':'joins this household'}</span>
+          <span class="status-pill">${c.used?'used':'not used yet'}</span>
+        </div>
+      </div>`).join('') : '<div class="empty-note">No invite codes yet.</div>';
+  }
 }
 function moveInList(collectionName, sortedList, id, direction){
   const idx = sortedList.findIndex(x=>x.id===id);
@@ -2023,7 +2233,7 @@ function moveInList(collectionName, sortedList, id, direction){
   reordered.forEach((item, i)=>{
     const stateIdx = state[collectionName].findIndex(x=>x.id===item.id);
     if(stateIdx>-1) state[collectionName][stateIdx].order = i;
-    if(firebaseReady && !String(item.id).startsWith('local')) dbWrite(db.collection(collectionName).doc(item.id).update({order:i}));
+    if(firebaseReady && !String(item.id).startsWith('local')) dbWrite(hdb(collectionName).doc(item.id).update({order:i}));
   });
   renderAll();
 }
@@ -2045,21 +2255,37 @@ function wireMoveArrows(container, listsById){
 function removeDoc(collection, id){
   state[collection] = state[collection].filter(x=>x.id!==id);
   renderAll();
-  if(firebaseReady) dbWrite(db.collection(collection).doc(id).delete());
+  if(firebaseReady) dbWrite(hdb(collection).doc(id).delete());
 }
+document.getElementById('genJoinCodeBtn').addEventListener('click', ()=>{
+  if(!firebaseReady) return;
+  const code = genInviteCode();
+  dbWrite(db.collection('inviteCodes').doc(code).set({
+    type: 'join-household', joinHouseholdId: state.householdId, createdInHouseholdId: state.householdId,
+    used: false, usedByUid: null, createdByUid: auth.currentUser.uid, createdAt: new Date().toISOString()
+  }));
+});
+document.getElementById('genNewHouseholdCodeBtn').addEventListener('click', ()=>{
+  if(!firebaseReady) return;
+  const code = genInviteCode();
+  dbWrite(db.collection('inviteCodes').doc(code).set({
+    type: 'new-household', joinHouseholdId: null, createdInHouseholdId: state.householdId,
+    used: false, usedByUid: null, createdByUid: auth.currentUser.uid, createdAt: new Date().toISOString()
+  }));
+});
 document.getElementById('addFamilyBtn').addEventListener('click', ()=> openFamilyModal(null));
 document.getElementById('addRoutineBtn').addEventListener('click', ()=> openRoutineModal(null));
 document.getElementById('addChoreBtn').addEventListener('click', ()=> openChoreModal(null));
 document.getElementById('savePayoutBtn').addEventListener('click', ()=>{
   const data = Object.assign({}, state.settings, { payPeriodAnchor: document.getElementById('payAnchorInput').value || todayISO(), payPeriodType: document.getElementById('payTypeInput').value });
   state.settings = data;
-  if(firebaseReady) dbWrite(db.collection('settings').doc('main').set(data, {merge:true}));
+  if(firebaseReady) dbWrite(hdb('settings').doc('main').set(data, {merge:true}));
   renderAll();
 });
 document.getElementById('saveWorkEmailBtn').addEventListener('click', ()=>{
   const data = Object.assign({}, state.settings, { workEmailTo: document.getElementById('workEmailInput').value.trim() });
   state.settings = data;
-  if(firebaseReady) dbWrite(db.collection('settings').doc('main').set(data, {merge:true}));
+  if(firebaseReady) dbWrite(hdb('settings').doc('main').set(data, {merge:true}));
   renderAll();
 });
 document.getElementById('saveEveryoneColorBtn').addEventListener('click', ()=>{
@@ -2068,7 +2294,7 @@ document.getElementById('saveEveryoneColorBtn').addEventListener('click', ()=>{
     everyoneTextColor: document.getElementById('everyoneTextColorInput').value,
   });
   state.settings = data;
-  if(firebaseReady) dbWrite(db.collection('settings').doc('main').set(data, {merge:true}));
+  if(firebaseReady) dbWrite(hdb('settings').doc('main').set(data, {merge:true}));
   renderAll();
 });
 

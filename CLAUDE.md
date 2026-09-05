@@ -105,6 +105,108 @@ thing you can do first — it will likely surface real bugs that were never actu
   day-scoped listeners via `subscribeRoutineLog()`/`subscribeRecurringReminderLog()`/
   `subscribeChoreLog()`. If a "stuck on an old date" bug is ever reported again, check this
   mechanism before assuming something new broke.
+- `migrateLegacyDataIntoNewHousehold()` originally wrote `users/{uid}` (linking the account to its
+  new household) *last*, after copying every legacy doc into the household's subcollections. Once
+  the security rules gate `households/{id}/**` writes on the requester's own
+  `users/{uid}.householdId`, that ordering means every single migration write gets rejected —
+  there's no linked household yet at write time. Fixed by writing `users/{uid}` immediately after
+  creating the household doc, before the copy loop starts. If a "migration silently does nothing
+  / everything vanishes after migrating" bug is ever reported, check this ordering first.
+- The sign-up form originally validated the invite code (`inviteCodes/{code}.get()`) *before*
+  calling `createUserWithEmailAndPassword()` — but that read happens while unauthenticated, which
+  the security rules don't allow, so sign-up would fail for every code, valid or not. Fixed by
+  creating the Auth account first, then validating/redeeming the code (`redeemInviteCode()`
+  already throws a readable error for a bad/used code); if redemption fails, the just-created
+  account is rolled back (`cred.user.delete()`) so a retry with the right code doesn't hit "email
+  already in use" against an orphaned account.
+
+## Multi-tenancy: households
+
+Every account belongs to exactly one **household**, and all of the day-to-day data below (family
+members, routines, chores, calendar events, reminders, settings) lives under
+`households/{householdId}/{collectionName}` instead of at the collection root. This exists
+because the app originally assumed every signed-in account shared one calendar — fine when the
+only accounts were the two the household owner created by hand, but wrong the moment a second,
+unrelated person got an account (their own real bug report: creating a Firebase Auth account for
+a friend gave the friend the owner's calendar, since there was no per-account data boundary at
+all). `hdb(name)` is the one function that builds the household-scoped path
+(`db.collection('households').doc(state.householdId).collection(name)`) — every other function in
+the app calls `hdb('events')`, `hdb('routines')`, etc. exactly the way it used to call
+`db.collection('events')`, with zero per-call-site household-awareness needed. Only three things
+stay at the Firestore root, outside any single household, by definition:
+- `users/{uid}` — routes a signed-in account to its `householdId`. Looked up once on sign-in
+  (`resolveHousehold()`) and by Firestore rules (`myHouseholdId()`, a `get()` lookup — this is
+  what makes real server-side data isolation possible without Cloud Functions/the Blaze plan).
+- `households/{householdId}` — just `{name, ownerUid, createdAt}`; the parent of every
+  household's `hdb()`-scoped subcollections.
+- `inviteCodes/{code}` — `{type: 'join-household'|'new-household', joinHouseholdId,
+  createdInHouseholdId, used, usedByUid, createdByUid, createdAt}`, an 8-char random string
+  (`genInviteCode()`) as the literal doc id, same composite-id-as-doc-id convention as the log
+  collections below. Every new account redeems one to link to a household — see "Sign-up is
+  invite-gated" below. `joinHouseholdId` and `createdInHouseholdId` look similar but answer
+  different questions and must not be conflated: `joinHouseholdId` is what redemption acts on —
+  the household a `'join-household'` code adds the new account to (`null` for a `'new-household'`
+  code, since that type creates a brand-new household instead of joining one). `createdInHouseholdId`
+  is always set, on both types, purely so Settings' invite-codes list can query "codes generated
+  from *this* household's Settings page" (`.where('createdInHouseholdId','==', state.householdId)`)
+  — it plays no role in what redeeming the code actually does.
+
+**Sign-up is invite-gated, and this is a soft/UI-level gate, not a hard security boundary.**
+There's no payment/paywall yet to gate free accounts against some other way, so for now every new
+account — whether starting a brand-new household or joining an existing one — must redeem a code
+someone generated from Settings → Invites. But Firebase Email/Password sign-up, once enabled in
+the console, accepts a create-account call from anyone holding the app's public config values
+(which are meant to be public — see below) — nothing stops someone technical enough to open
+devtools from calling `auth.createUserWithEmailAndPassword` and `households.add()` directly,
+skipping the invite-code screen entirely. This does NOT threaten any other household's data —
+Firestore rules isolate every household regardless of how the account was created, by checking
+the requester's own `users/{uid}` doc, never anything about the invite code — it just means
+"invite-gated" only deters casual sign-ups through the app's own UI. A real technical barrier
+would need a server-side check (Cloud Functions), which needs the Blaze plan; out of scope until
+that's an actual problem someone hits.
+
+**The one path that skips an invite code**: migrating a pre-households account's own existing
+data (`detectLegacyData()`/`migrateLegacyDataIntoNewHousehold()`) — no code is needed there
+because it's converting data behind an already-legitimate, already-existing account, not creating
+a new one. `LEGACY_ROOT_COLLECTIONS` lists the old flat collection names; migration copies every
+doc from each into the new household's matching subcollection, copies `settings/main` too, then
+links `users/{uid}` to the new household. **Order matters here**: `users/{uid}` is written
+*before* any subcollection doc is copied, not after — the security rules authorize
+`households/{id}/**` writes by looking up the requester's own `users/{uid}.householdId`, so
+writing that link last would make every migration write get rejected as unauthorized (no linked
+household yet at write time). The old root-level docs are deliberately left in place afterward
+(never read again, but not deleted) as a backup — safe to clear out by hand once the new
+household checks out. A `_migrationStatus/main` marker doc (`{migrated, householdId,
+migratedByUid, migratedAt}`), written once migration succeeds, makes `detectLegacyData()` return
+false for everyone afterward — this closes a real footgun: a household that pre-dates households
+often has more than one existing Firebase Auth login sharing the same old data (e.g. both
+parents), and without this marker, a second login signing in fresh would *also* see the Migrate
+button and, if clicked, create a second, duplicate household from the same source data. The
+correct flow for a second pre-existing login is to redeem a "join" invite code generated by
+whichever login migrated first, never to click Migrate itself — SETUP.md spells this out for the
+user, and the marker is the code-level backstop in case that instruction gets missed.
+
+**Sign-up's account-creation-then-validation order, and why it has a rollback.** The sign-up
+button (`signupBtn`) calls `auth.createUserWithEmailAndPassword()` *before* validating the invite
+code, not after — validating first would mean reading `inviteCodes/{code}` while unauthenticated,
+which the security rules (correctly) don't allow. If `redeemInviteCode()` then fails (bad or
+already-used code), the just-created Auth account is deleted again
+(`cred.user.delete().catch(...)`) — otherwise a retry with the correct code would fail on Firebase
+Auth's "email already in use" against an orphaned, household-less account, with no way for the
+user to tell why. (If code redemption throws for some other reason — e.g. a dropped connection
+right as the rollback itself runs — the account can still end up orphaned; this is accepted as a
+rare edge case rather than built out further, since the user always has a working recovery path:
+sign back in with that same email/password, land on "One more step," and redeem a code there.)
+
+**Screens**: `showLogin()` (sign in / sign up toggle, `#loginScreen`), `showHouseholdSetup()`
+("one more step" — migrate-if-legacy-detected, or redeem a code, `#householdSetupScreen`), and
+`showApp()` (`#app`) are mutually exclusive and only ever toggled from inside
+`if(firebaseReady){...}` — there is no auth/household flow at all when there's no Firebase project
+connected (`firebaseReady===false` just calls `showApp()` directly), so none of this — the real
+account-creation flow, invite-code redemption, migration, or the security rules that gate all of
+it — can be exercised in an offline/no-Firebase test environment. Only pure, Firebase-independent
+pieces (`genInviteCode()`'s format, the login screen's static initial markup) are covered by
+Playwright tests here; the real flow needs a real Firebase project and a real browser.
 
 ## Data model (Firestore collections)
 
@@ -362,6 +464,11 @@ etc.) is intentional and should stay generic.
 - Real drag-and-drop event rescheduling (deferred — see above)
 - External calendar import/subscription (deferred — see above)
 - True update flow for work-calendar Outlook blocks (currently remove-then-add)
+- Payment/subscription/billing (Stripe or similar) for households beyond the free tier — the user
+  explicitly chose to build the households/invite/self-serve-account foundation now and defer all
+  payment work to a separate future conversation, since a real paywall needs a secure backend
+  (Cloud Functions), which needs the paid Blaze plan. Don't start building this without a fresh,
+  explicit request — it's a deliberate scope cut, not an oversight.
 
 ## Files
 
