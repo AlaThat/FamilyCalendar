@@ -218,15 +218,50 @@ thing you can do first — it will likely surface real bugs that were never actu
   deliberately omit `recurrence`/`weeklyDays`/`weeklyInterval`/`endDate`/`birthYear` from what can
   be overridden — those describe the *series*, not one date, so the edit form hides the Repeats
   section entirely when editing just one occurrence.
-- `reminders`: `{text, done, order}` — one-off, manually added/removed from the Reminders tab,
-  done state persists until deleted.
-- `recurringReminders`: `{text, schedule: 'daily'|'weekday'|'weekend', order}` — configured in
-  Settings; shows up automatically on the Reminders tab's list (marked with a ↻) on its scheduled
-  days. (Kept the simpler 3-option `schedule` here rather than switching to `days` like routines
-  — reminders don't have the "different days per kid" need that motivated the routine change.)
-- `recurringReminderLog`: doc id `${date}_${reminderId}` → `{date, reminderId, done}` — same
-  per-day-reset pattern as `routineLog`, just without a `memberId` since reminders aren't
-  per-person.
+- `reminders`: `{text, date, recurrence: 'none'|'weekly'|'monthly-date'|'monthly-weekday'|'yearly',
+  weeklyDays, weeklyInterval, order}` — one unified reminder concept (merged from what used to be
+  two separate features: quick manual reminders and Settings' recurring reminders). Reuses the
+  *exact* event recurrence shape (`recurrence`/`weeklyDays`/`weeklyInterval`, `date` as the
+  pattern's anchor) rather than inventing a parallel scheduling model — `recurrence:'none'` means
+  one-time, due on `date` itself, same convention as events. The Add Reminder modal (one
+  `openReminderModal()` for both add and edit, reached only from the Reminders tab — Settings no
+  longer has a separate recurring-reminders section) defaults to one-time, dated today, so a quick
+  add is still just as fast as the old manual-reminder flow.
+
+  **Reminders don't reset daily like routines/chores — they persist until done, then clear
+  overnight.** Once a reminder's scheduled date arrives, it stays outstanding on the Reminders tab
+  across as many days as it takes (`reminderDueOnOrBefore(reminder, dateISO)` walks backward from
+  `dateISO` to find the most recent scheduled occurrence — bounded to 400 days — reusing
+  `eventOccursOnDate()` for the recurring-pattern math). Checking it off logs a completion in
+  `reminderCompletions` (doc id `${reminderId}_${occurrenceDate}` → `{reminderId, occurrenceDate,
+  completedDate}` — same composite-key convention as `routineLog`/`choreLog`) keyed to *which
+  occurrence* it satisfies, so a missed multi-week-old reminder shows as exactly one outstanding
+  row (never one per missed cycle) and becomes outstanding again fresh the next time it's due,
+  not immediately. It stays visibly checked for the rest of the day it was completed, then
+  disappears starting the next day — mirrors the day-boundary "reset" all the other logs use, just
+  clearing instead of resetting. Un-checking it (only possible same-day, since a reminder
+  completed on an earlier day is no longer shown at all) removes the completion and its linked
+  calendar entry.
+
+  Checking a reminder off also drops a small real, editable/deletable all-day calendar event
+  titled `✓ {reminder text}` on the date it was *actually* completed (not the date it was
+  originally due) — e.g. "replace the air filter" due Monday but done Wednesday puts "✓ Replace
+  the air filter" on Wednesday, not Monday. The event is found again for removal (on uncheck, or
+  when the whole reminder's completion is cleared) by title+date match rather than a stored id,
+  since a brand-new event's optimistic local id gets superseded by Firestore's real id as soon as
+  the live listener catches up — content-matching sidesteps that race entirely.
+
+  Legacy docs from before this redesign are read through the same never-migrated fallback pattern
+  used everywhere else in this app: a plain old-shape manual reminder (`{text, done, order}`, no
+  `date`/`recurrence` at all) is always due, matching its old always-on-the-list behavior.
+  `recurringReminders` (its own collection, `{text, schedule:'daily'|'weekday'|'weekend', order}`)
+  is now read-only legacy — `normalizeLegacyRecurringReminder()` maps it to a weekly pattern
+  anchored to a fixed past date (`daysArrayForSchedule(schedule)` for the days, interval 1), and
+  `allReminders()` merges both sources for every render/lookup. Editing a legacy recurring
+  reminder migrates it into the unified `reminders` collection (delete from the old collection,
+  add to the new one) rather than upgrading it in place, since — unlike routines/chores' legacy
+  fallback, which stays within one collection — this one predates the two-collections-into-one
+  merge.
 - `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly', workEmailTo,
   everyoneColor, everyoneTextColor}`. `everyoneColor`/`everyoneTextColor` (hex strings, default
   `#3A362C`/`#FFFFFF`, same fallback-on-read pattern as the rest of `settings/main`) are the
@@ -305,8 +340,10 @@ to also show a person-selector strip and the reminders list, both removed: the p
 strip never actually filtered anything (dead UI), and reminders got their own tab since they're
 conceptually unrelated to routines. Chores leads with "Today's chores" (assigned chores due
 today, same per-member card layout as Today's routines) above the existing "Up for grabs" pool
-and earnings strip — this used to live on the Today tab. Reminders holds both the manual one-off
-list and its add/reorder controls, unchanged in behavior from before, just relocated.
+and earnings strip — this used to live on the Today tab. Reminders holds the unified reminder
+list (one-time and recurring together, see the `reminders` data-model entry above) and its
+add/reorder controls — originally just manual one-off reminders relocated here unchanged, later
+merged with what had been a separate Settings-only recurring-reminders feature.
 
 ## User context (for tone/scope calibration, not for hardcoding into the app)
 
