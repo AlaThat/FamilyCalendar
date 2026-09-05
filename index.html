@@ -71,9 +71,19 @@
 
   /* Calendar */
   .cal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:10px; }
-  .cal-header h2{ font-family:"Fraunces",serif; font-weight:600; font-size:28px; margin:0; }
-  .cal-nav-btn{ border:1px solid var(--paper-line); background:var(--white); border-radius:8px; width:38px; height:38px; font-size:18px; cursor:pointer; }
+  /* The prev/title/next trio is one flex item so flex-wrap can never split "next" onto its own
+     line away from "prev" (a real reported bug on narrow phones, where a long Day-view title
+     like "Saturday, September 5, 2026" filled the row and pushed just the next-arrow to line 2).
+     On wide screens this sits on the same row as the view-toggle/add-event button, same as
+     before. Below 640px it's forced to its own full-width row via flex-basis (see the media
+     query) instead of trying to share space with them — letting it shrink freely on that shared
+     row (an earlier version of this fix did that) let the two nav arrows overlap the view-toggle
+     once the row ran out of room, which is worse than the wrap bug it was meant to fix. */
+  .cal-title-group{ display:flex; align-items:center; gap:8px; min-width:0; flex:1; }
+  .cal-header h2{ font-family:"Fraunces",serif; font-weight:600; font-size:28px; margin:0; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cal-nav-btn{ border:1px solid var(--paper-line); background:var(--white); border-radius:8px; width:38px; height:38px; font-size:18px; cursor:pointer; flex-shrink:0; }
   .cal-add-btn{ border:none; background:var(--ink); color:white; border-radius:8px; padding:9px 16px; font-weight:700; cursor:pointer; font-size:14px; }
+  .cal-today-btn{ border:1px solid var(--paper-line); background:var(--white); color:var(--ink); border-radius:8px; padding:9px 16px; font-weight:700; cursor:pointer; font-size:14px; flex-shrink:0; }
   .view-toggle{ display:flex; border:1px solid var(--paper-line); border-radius:8px; overflow:hidden; }
   .vt-btn{ border:none; background:var(--white); padding:8px 14px; font-size:13px; font-weight:700; cursor:pointer; color:var(--ink-soft); }
   .vt-btn.active{ background:var(--ink); color:white; }
@@ -94,19 +104,26 @@
      renderTimeGrid(). All-day events pin to a row on top; timed events are absolutely
      positioned within a shared scrollable hour grid so their vertical position reflects when
      they actually land in the day, with overlapping events packed side by side. */
-  .time-grid-wrap{ display:flex; flex-direction:column; flex:1; min-height:0; }
-  .allday-row{ display:flex; border-bottom:1px solid var(--paper-line); padding-bottom:4px; margin-bottom:2px; flex-shrink:0; }
+  .time-grid-wrap{ display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; }
+  /* min-width:0 + overflow:hidden together on every level of this row, not just min-width:0
+     alone — iPhone Safari was reported clipping the last (Saturday) column off the right edge
+     of the screen on real hardware even though the same markup measured with zero overflow in
+     this sandbox's only available test engine (Chromium). min-width:0 alone is the textbook fix
+     for a flex item refusing to shrink below its content's width, but Safari has a long history
+     of not reliably honoring it in nested flex rows with text content unless overflow:hidden
+     backs it up — this is cheap, harmless insurance even where it isn't strictly needed. */
+  .allday-row{ display:flex; min-width:0; border-bottom:1px solid var(--paper-line); padding-bottom:4px; margin-bottom:2px; flex-shrink:0; }
   .hour-axis-spacer{ width:52px; flex-shrink:0; }
-  .allday-col{ flex:1; min-width:0; padding:2px 4px; cursor:pointer; display:flex; flex-direction:column; gap:3px; border-left:1px solid var(--paper-line); }
-  .week-day-head{ font-weight:700; font-size:12px; text-align:center; color:var(--ink-soft); margin-bottom:2px; }
+  .allday-col{ flex:1; min-width:0; overflow:hidden; padding:2px 4px; cursor:pointer; display:flex; flex-direction:column; gap:3px; border-left:1px solid var(--paper-line); }
+  .week-day-head{ font-weight:700; font-size:12px; text-align:center; color:var(--ink-soft); margin-bottom:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .week-day-head.today{ color:var(--accent); }
   .week-day-head .cal-date-num{ display:block; font-size:16px; color:var(--ink); }
-  .allday-pill{ font-size:11px; padding:3px 6px; border-radius:5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
-  .time-grid-scroll{ flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; position:relative; }
-  .time-grid-inner{ display:flex; position:relative; }
+  .allday-pill{ font-size:11px; padding:3px 6px; border-radius:5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; max-width:100%; }
+  .time-grid-scroll{ flex:1; min-height:0; min-width:0; overflow-y:auto; overflow-x:hidden; position:relative; }
+  .time-grid-inner{ display:flex; min-width:0; position:relative; }
   .hour-axis{ width:52px; flex-shrink:0; position:relative; }
   .hour-label{ position:absolute; right:8px; transform:translateY(-50%); font-size:11px; color:var(--ink-soft); white-space:nowrap; }
-  .time-col{ flex:1; min-width:0; position:relative; border-left:1px solid var(--paper-line); cursor:pointer; }
+  .time-col{ flex:1; min-width:0; overflow:hidden; position:relative; border-left:1px solid var(--paper-line); cursor:pointer; }
   .hour-line{ position:absolute; left:0; right:0; border-top:1px solid var(--paper-line); }
   .time-evt{ position:absolute; border-radius:6px; padding:2px 6px; font-size:11px; line-height:1.25; overflow:hidden; cursor:pointer; box-shadow:0 1px 2px rgba(44,42,36,0.15); box-sizing:border-box; }
   .time-evt-title{ font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -161,7 +178,7 @@
   .login-box{ background:var(--white); border:1px solid var(--paper-line); border-radius:14px; padding:32px; width:100%; max-width:360px; }
   .login-box h1{ font-family:"Fraunces",serif; margin-top:0; }
 
-  @media (max-width: 640px){ main{ padding: 14px; } .cal-header h2{ font-size:22px; } }
+  @media (max-width: 640px){ main{ padding: 14px; } .cal-header h2{ font-size:22px; } .cal-title-group{ flex-basis:100%; } }
 </style>
 </head>
 <body>
@@ -207,9 +224,12 @@
 
     <section id="tab-calendar">
       <div class="cal-header">
-        <button class="cal-nav-btn" id="calPrev">‹</button>
-        <h2 id="calMonthLabel"></h2>
-        <button class="cal-nav-btn" id="calNext">›</button>
+        <div class="cal-title-group">
+          <button class="cal-nav-btn" id="calPrev">‹</button>
+          <h2 id="calMonthLabel"></h2>
+          <button class="cal-nav-btn" id="calNext">›</button>
+        </div>
+        <button class="cal-today-btn hidden" id="calTodayBtn">Today</button>
         <div class="view-toggle">
           <button class="vt-btn active" data-view="month">Month</button>
           <button class="vt-btn" data-view="week">Week</button>
@@ -1322,6 +1342,25 @@ function renderCalendarHeader(){
   } else {
     label.textContent = dayCursor.toLocaleDateString(undefined,{weekday:'long', month:'long', day:'numeric', year:'numeric'});
   }
+  document.getElementById('calTodayBtn').classList.toggle('hidden', isViewingToday());
+}
+/* Whether the currently-visible month/week/day already includes today — used to hide the
+   "Today" jump button when it would be pointless (you're already looking at today), and to show
+   it once you've navigated away, e.g. planning ahead to next month and wanting back quickly. */
+function isViewingToday(){
+  const today = new Date();
+  if(calViewMode==='month'){
+    return calCursor.getFullYear()===today.getFullYear() && calCursor.getMonth()===today.getMonth();
+  } else if(calViewMode==='week'){
+    // Compare at midnight on both sides (not the live time-of-day against a midnight boundary) —
+    // otherwise this would wrongly read as "not viewing today" on the week's last day, since any
+    // time after midnight is later than a midnight `end`.
+    const todayMidnight = new Date(today); todayMidnight.setHours(0,0,0,0);
+    const start = startOfWeek(weekCursor), end = new Date(start); end.setDate(end.getDate()+6);
+    return todayMidnight>=start && todayMidnight<=end;
+  } else {
+    return isoOf(dayCursor) === todayISO();
+  }
 }
 function renderPersonFilter(){
   const el = document.getElementById('personFilter');
@@ -1351,6 +1390,12 @@ document.getElementById('calNext').addEventListener('click', ()=>{
   renderCalendar();
 });
 document.getElementById('calAddBtn').addEventListener('click', ()=> openDayModal(calViewMode==='day' ? isoOf(dayCursor) : todayISO()));
+document.getElementById('calTodayBtn').addEventListener('click', ()=>{
+  calCursor = new Date(); calCursor.setDate(1);
+  weekCursor = new Date();
+  dayCursor = new Date();
+  renderCalendar();
+});
 
 function findEventById(id){ return state.events.find(x=>x.id===id); }
 /* Shared entry point for every "tap an event to edit it" spot (Month/Week/Day view pills, and

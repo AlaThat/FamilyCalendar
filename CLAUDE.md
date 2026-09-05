@@ -441,6 +441,46 @@ via scroll either direction for an early flight or a late event. Month view is u
 of this — it stays the compact multi-week grid it always was, matching how Outlook's own Month
 view also doesn't show a time grid.
 
+**Calendar header: the prev/title/next trio is one flex item, on purpose.** `.cal-title-group`
+wraps `calPrev`/`calMonthLabel`/`calNext` together so `.cal-header`'s `flex-wrap` can only ever
+move that whole group to a new line, never split "next" off onto its own line away from "prev" —
+a real bug reported on an iPhone, where Day view's long title ("Saturday, September 5, 2026")
+filled the row and pushed just the next-arrow down to line 2 by itself. `.cal-header h2` also
+gets `flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis` so the *label* shrinks/
+truncates first under real width pressure rather than forcing a button out of the row. Below
+640px, `.cal-title-group{ flex-basis:100% }` forces the trio onto its own full-width row
+unconditionally, rather than letting it compete for space with the view-toggle/add-event button
+on a shared row — an earlier version of this fix let the group shrink freely on a shared row
+instead, which fixed the wrap but caused a *worse* bug: on a narrow phone the group could still
+run out of room and the next-arrow would visually overlap/hide behind the view-toggle instead of
+wrapping cleanly. Wide screens are unaffected — the trio still shares one row with the
+view-toggle/add-button there, exactly as before.
+
+**Time-grid columns: `min-width:0` alone wasn't enough on real iPhone Safari.** `.allday-col` and
+`.time-col` already had `flex:1; min-width:0` (the textbook fix for a flex item refusing to
+shrink below its content's width) and, measured in this project's only available headless test
+engine (Chromium), that was already sufficient — seven equal-width columns with zero overflow,
+even with deliberately long unwrappable event-title text. But a real iPhone still clipped the
+last (Saturday) column off the right edge of the screen. Safari has a long, well-documented
+history of not reliably honoring `min-width:0` in nested flex rows with text content unless it's
+backed up with an explicit `overflow:hidden` on the same element — added to `.allday-col`,
+`.time-col`, `.allday-row`, and `.time-grid-inner` as cheap, harmless insurance. **This app has no
+way to test real Safari/WebKit rendering in this sandbox (only Chromium is available)** — if a
+similar "works in my testing, clips on a real iPhone" layout bug is reported again, suspect this
+exact class of issue (a flex/grid sizing quirk that only manifests in WebKit) before assuming the
+math is wrong, and default to adding `overflow:hidden` alongside any `min-width:0`/`min-height:0`
+rather than trying to prove it's unnecessary from Chromium measurements alone.
+
+**"Today" jump button** (`#calTodayBtn`, next to the view-toggle) resets `calCursor`/`weekCursor`/
+`dayCursor` all at once to `new Date()` and re-renders — added because there was previously no
+quick way back to the present after navigating forward to plan future events, short of clicking
+the back arrow repeatedly. `isViewingToday()` decides whether it's shown at all (hidden whenever
+the current view already contains today, so it doesn't clutter the header when it'd be a no-op);
+its week-view check normalizes "now" to midnight before comparing against the (midnight-based)
+week-start/week-end bounds from `startOfWeek()` — comparing a live time-of-day against a midnight
+boundary directly would wrongly read as "not viewing today" on the week's last day, the same class
+of off-by-time-of-day bug `checkDayRollover()` already had to account for elsewhere.
+
 ## Design language (established, keep consistent)
 
 Paper-calendar aesthetic, not a SaaS dashboard — established deliberately per a design brief
