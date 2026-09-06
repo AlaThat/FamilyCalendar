@@ -317,6 +317,12 @@
         <button class="add-row-btn" id="addChoreBtn">+ Add chore</button>
       </div>
       <div class="settings-block">
+        <div class="section-title">Reminders</div>
+        <p class="section-sub">Every reminder, whether or not it's due today — the Reminders tab only shows what's currently outstanding, so a reminder that isn't due right now (e.g. "feed the cat" the day after it was last checked off) can only be edited or deleted from here.</p>
+        <div id="settingsReminderList"></div>
+        <button class="add-row-btn" id="addReminderSettingsBtn">+ Add reminder</button>
+      </div>
+      <div class="settings-block">
         <div class="section-title">Payout</div>
         <div class="field"><label>An actual payday date (any one — we'll figure out the cycle from there)</label><input type="date" id="payAnchorInput"></div>
         <div class="field"><label>How often</label>
@@ -2186,9 +2192,16 @@ function openChoreModal(existing){
 function openReminderModal(existing){
   const isEdit = !!existing;
   const modalRoot = document.getElementById('modalRoot');
-  const rec = isEdit ? (existing.recurrence || 'none') : 'none';
   const weeklyDaysDefault = isEdit ? eventWeeklyDays(existing) : [new Date().getDay()];
   const weeklyIntervalDefault = isEdit ? eventWeeklyInterval(existing) : 1;
+  // "Daily" isn't its own stored recurrence value — it's weekly with every day checked, same
+  // representation the rest of the app already uses (see daysLabel()'s "Every day" case). This
+  // is purely a friendlier dropdown option: picking it hides the day-checkbox row (redundant when
+  // every day is implied) and saves recurrence:'weekly'/weeklyDays:[0..6] underneath, so a saved
+  // "Daily" reminder reopens showing "Daily" again automatically, detected here.
+  const isDaily = isEdit && existing.recurrence === 'weekly' && weeklyIntervalDefault === 1
+    && [0,1,2,3,4,5,6].every(d => weeklyDaysDefault.includes(d));
+  const rec = isEdit ? (isDaily ? 'daily' : (existing.recurrence || 'none')) : 'none';
   const dateDefault = isEdit ? (existing.date || todayISO()) : todayISO();
   modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">
     <button class="close-x" id="closeModal">✕</button>
@@ -2197,6 +2210,7 @@ function openReminderModal(existing){
     <div class="field"><label>Repeats</label>
       <select id="remRepeat">
         <option value="none" ${rec==='none'?'selected':''}>One time</option>
+        <option value="daily" ${rec==='daily'?'selected':''}>Daily</option>
         <option value="weekly" ${rec==='weekly'?'selected':''}>Weekly</option>
         <option value="monthly-date" ${rec==='monthly-date'?'selected':''}>Monthly (same date)</option>
         <option value="monthly-weekday" ${rec==='monthly-weekday'?'selected':''}>Monthly (same weekday — "1st Tuesday")</option>
@@ -2232,9 +2246,11 @@ function openReminderModal(existing){
     if(!text){ showToast('Name the reminder first.'); return; }
     const dateVal = document.getElementById('remDate').value;
     if(!dateVal){ showToast('Pick a date.'); return; }
-    const recurrence = document.getElementById('remRepeat').value;
-    let weeklyDays = null, weeklyInterval = null;
-    if(recurrence === 'weekly'){
+    const repeatVal = document.getElementById('remRepeat').value;
+    let recurrence = repeatVal, weeklyDays = null, weeklyInterval = null;
+    if(repeatVal === 'daily'){
+      recurrence = 'weekly'; weeklyDays = [0,1,2,3,4,5,6]; weeklyInterval = 1;
+    } else if(recurrence === 'weekly'){
       weeklyDays = Array.from(modalRoot.querySelectorAll('#remWeeklyDays input:checked')).map(i=>parseInt(i.value,10));
       if(!weeklyDays.length){ showToast('Pick at least one day for the weekly pattern.'); return; }
       weeklyInterval = parseInt(document.getElementById('remWeeklyInterval').value, 10) || 1;
@@ -2307,6 +2323,23 @@ function renderSettings(){
   cEl.querySelectorAll('[data-ch-edit]').forEach(btn=> btn.addEventListener('click', ()=> openChoreModal(state.chores.find(x=>x.id===btn.dataset.chEdit))));
   wireMoveArrows(cEl, { chores: sortedChores });
 
+  // Unlike the Reminders tab (which only shows what's currently due), this lists every reminder
+  // unconditionally — see the settings-block's own note above for why that's necessary.
+  const sortedSettingsReminders = allReminders().slice().sort(byOrder);
+  const srEl = document.getElementById('settingsReminderList');
+  srEl.innerHTML = sortedSettingsReminders.length ? sortedSettingsReminders.map(r=>{
+    const summary = reminderRecurrenceSummary(r) || (r.date ? 'One time · ' + r.date : 'One time'); // legacy manual reminders have no date at all
+    return `<div class="list-row">
+      <div class="grow"><strong>${esc(r.text)}</strong> <span class="status-pill">${esc(summary)}</span></div>
+      ${moveArrowsHtml('reminders', sortedSettingsReminders, r.id)}
+      <button class="small-btn" data-srem-edit="${r.id}">Edit</button>
+      <button class="del-x" data-srem-del="${r.id}">✕</button>
+    </div>`;
+  }).join('') : '<div class="empty-note">No reminders yet.</div>';
+  srEl.querySelectorAll('[data-srem-edit]').forEach(btn=> btn.addEventListener('click', ()=> openReminderModal(findReminderById(btn.dataset.sremEdit))));
+  srEl.querySelectorAll('[data-srem-del]').forEach(btn=> btn.addEventListener('click', ()=> deleteReminder(btn.dataset.sremDel)));
+  wireMoveArrows(srEl, { reminders: sortedSettingsReminders });
+
   const everyoneColorInput = document.getElementById('everyoneColorInput');
   if(everyoneColorInput && document.activeElement !== everyoneColorInput) everyoneColorInput.value = state.settings.everyoneColor || '#3A362C';
   const everyoneTextColorField = document.getElementById('everyoneTextColorField');
@@ -2342,9 +2375,16 @@ function moveInList(collectionName, sortedList, id, direction){
   const reordered = sortedList.slice();
   [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
   reordered.forEach((item, i)=>{
-    const stateIdx = state[collectionName].findIndex(x=>x.id===item.id);
-    if(stateIdx>-1) state[collectionName][stateIdx].order = i;
-    if(firebaseReady && !String(item.id).startsWith('local')) dbWrite(hdb(collectionName).doc(item.id).update({order:i}));
+    // A reminder normalized from the legacy recurringReminders collection (see
+    // normalizeLegacyRecurringReminder) keeps its original doc id but actually lives in a
+    // different Firestore collection than 'reminders' — write to the collection it's really
+    // stored in, same fallback deleteReminder() already uses, or this silently fails to persist
+    // the new order for any legacy item (and throws a "no document to update" toast).
+    const targetCollection = item._legacySource || collectionName;
+    const stateArr = state[targetCollection];
+    const stateIdx = stateArr ? stateArr.findIndex(x=>x.id===item.id) : -1;
+    if(stateIdx>-1) stateArr[stateIdx].order = i;
+    if(firebaseReady && !String(item.id).startsWith('local')) dbWrite(hdb(targetCollection).doc(item.id).update({order:i}));
   });
   renderAll();
 }
@@ -2404,6 +2444,7 @@ document.getElementById('genNewHouseholdCodeBtn').addEventListener('click', asyn
 document.getElementById('addFamilyBtn').addEventListener('click', ()=> openFamilyModal(null));
 document.getElementById('addRoutineBtn').addEventListener('click', ()=> openRoutineModal(null));
 document.getElementById('addChoreBtn').addEventListener('click', ()=> openChoreModal(null));
+document.getElementById('addReminderSettingsBtn').addEventListener('click', ()=> openReminderModal(null));
 document.getElementById('savePayoutBtn').addEventListener('click', ()=>{
   const data = Object.assign({}, state.settings, { payPeriodAnchor: document.getElementById('payAnchorInput').value || todayISO(), payPeriodType: document.getElementById('payTypeInput').value });
   state.settings = data;
