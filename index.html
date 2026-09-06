@@ -71,14 +71,19 @@
 
   /* Calendar */
   .cal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:10px; }
-  /* The prev/title/next trio is one flex item so flex-wrap can never split "next" onto its own
-     line away from "prev" (a real reported bug on narrow phones, where a long Day-view title
-     like "Saturday, September 5, 2026" filled the row and pushed just the next-arrow to line 2).
-     On wide screens this sits on the same row as the view-toggle/add-event button, same as
-     before. Below 640px it's forced to its own full-width row via flex-basis (see the media
-     query) instead of trying to share space with them — letting it shrink freely on that shared
-     row (an earlier version of this fix did that) let the two nav arrows overlap the view-toggle
-     once the row ran out of room, which is worse than the wrap bug it was meant to fix. */
+  /* The prev/title/next/Today group is one flex item so flex-wrap can never split "next" onto
+     its own line away from "prev" (a real reported bug on narrow phones, where a long Day-view
+     title like "Saturday, September 5, 2026" filled the row and pushed just the next-arrow to
+     line 2). calTodayBtn lives in here too, not in its own row alongside the view-toggle/add
+     button — an earlier version put it there and it pushed the view-toggle row onto a THIRD
+     line on mobile (the row ran out of width once Today joined it), eating vertical space that
+     matters on a small phone screen; here it just shares the title row's existing shrink budget
+     with the (already-truncating) h2 label instead of adding a new row. On wide screens this
+     whole group sits on the same row as the view-toggle/add-event button, same as before. Below
+     640px it's forced to its own full-width row via flex-basis (see the media query) instead of
+     trying to share space with them — letting it shrink freely on that shared row (an earlier
+     version of this fix did that) let the nav arrows overlap the view-toggle once the row ran
+     out of room, which is worse than the wrap bug it was meant to fix. */
   .cal-title-group{ display:flex; align-items:center; gap:8px; min-width:0; flex:1; }
   .cal-header h2{ font-family:"Fraunces",serif; font-weight:600; font-size:28px; margin:0; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cal-nav-btn{ border:1px solid var(--paper-line); background:var(--white); border-radius:8px; width:38px; height:38px; font-size:18px; cursor:pointer; flex-shrink:0; }
@@ -88,8 +93,8 @@
   .vt-btn{ border:none; background:var(--white); padding:8px 14px; font-size:13px; font-weight:700; cursor:pointer; color:var(--ink-soft); }
   .vt-btn.active{ background:var(--ink); color:white; }
   .person-filter{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
-  .pf-chip{ padding:7px 13px; border-radius:999px; border:2px solid var(--paper-line); cursor:pointer; font-size:13px; font-weight:600; background:var(--white); color:var(--ink-soft); }
-  .pf-chip.on{ color:white; border-color:transparent; }
+  .pf-chip{ padding:7px 13px; border-radius:999px; border:2px solid transparent; cursor:pointer; font-size:13px; font-weight:600; opacity:0.55; }
+  .pf-chip.on{ opacity:1; border-color:var(--ink); }
 
   .cal-grid{ display:grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap:6px; flex:1; min-height:0; }
   .cal-dow{ text-align:center; font-size:12px; color:var(--ink-soft); font-weight:700; padding-bottom:4px; }
@@ -178,7 +183,14 @@
   .login-box{ background:var(--white); border:1px solid var(--paper-line); border-radius:14px; padding:32px; width:100%; max-width:360px; }
   .login-box h1{ font-family:"Fraunces",serif; margin-top:0; }
 
-  @media (max-width: 640px){ main{ padding: 14px; } .cal-header h2{ font-size:22px; } .cal-title-group{ flex-basis:100%; } }
+  @media (max-width: 640px){ main{ padding: 14px; } .cal-header h2{ font-size:22px; } .cal-title-group{ flex-basis:100%; }
+    /* Tighter chip padding/gap on a phone-width screen so a typical set of names (a handful of
+       short-to-medium first names) has a real shot at fitting on one row instead of wrapping the
+       last chip onto its own line — genuinely long names/many people will still wrap, this just
+       buys back the couple dozen pixels that made the difference for an ordinary family size.
+       Scoped to phones only (not the iPad wall display this app is mainly built for) since iPads
+       have plenty of width and there's no reason to shrink tap targets there. */
+    .person-filter{ gap:6px; } .pf-chip{ padding:6px 10px; font-size:12px; } }
 </style>
 </head>
 <body>
@@ -228,8 +240,8 @@
           <button class="cal-nav-btn" id="calPrev">‹</button>
           <h2 id="calMonthLabel"></h2>
           <button class="cal-nav-btn" id="calNext">›</button>
+          <button class="cal-today-btn hidden" id="calTodayBtn">Today</button>
         </div>
-        <button class="cal-today-btn hidden" id="calTodayBtn">Today</button>
         <div class="view-toggle">
           <button class="vt-btn active" data-view="month">Month</button>
           <button class="vt-btn" data-view="week">Week</button>
@@ -1364,8 +1376,12 @@ function isViewingToday(){
 }
 function renderPersonFilter(){
   const el = document.getElementById('personFilter');
-  const chips = [`<div class="pf-chip ${calPersonFilter===null?'on':''}" data-pf="all" style="${calPersonFilter===null?'background:var(--everyone);':''}">Everyone</div>`]
-    .concat(state.family.map(m=>`<div class="pf-chip ${calPersonFilter===m.id?'on':''}" data-pf="${m.id}" style="${calPersonFilter===m.id?`background:${m.color};`:''}">${esc(m.name)}</div>`));
+  // Every chip is always filled with its own color (matching that person's calendar pills), not
+  // just the currently-selected one — makes it easy to spot who's who at a glance. The selected
+  // chip is picked out with full opacity + a dark ring; the rest sit at reduced opacity so the
+  // active filter still reads clearly without hiding anyone's color entirely.
+  const chips = [`<div class="pf-chip ${calPersonFilter===null?'on':''}" data-pf="all" style="background:var(--everyone);color:var(--everyone-text);">All</div>`]
+    .concat(state.family.map(m=>`<div class="pf-chip ${calPersonFilter===m.id?'on':''}" data-pf="${m.id}" style="background:${m.color};color:${textColorOf(m.id)};">${esc(m.name)}</div>`));
   el.innerHTML = chips.join('');
   el.querySelectorAll('.pf-chip').forEach(c=>{
     c.addEventListener('click', ()=>{ calPersonFilter = c.dataset.pf==='all' ? null : c.dataset.pf; renderCalendar(); });

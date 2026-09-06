@@ -471,15 +471,40 @@ exact class of issue (a flex/grid sizing quirk that only manifests in WebKit) be
 math is wrong, and default to adding `overflow:hidden` alongside any `min-width:0`/`min-height:0`
 rather than trying to prove it's unnecessary from Chromium measurements alone.
 
-**"Today" jump button** (`#calTodayBtn`, next to the view-toggle) resets `calCursor`/`weekCursor`/
-`dayCursor` all at once to `new Date()` and re-renders — added because there was previously no
-quick way back to the present after navigating forward to plan future events, short of clicking
-the back arrow repeatedly. `isViewingToday()` decides whether it's shown at all (hidden whenever
-the current view already contains today, so it doesn't clutter the header when it'd be a no-op);
-its week-view check normalizes "now" to midnight before comparing against the (midnight-based)
-week-start/week-end bounds from `startOfWeek()` — comparing a live time-of-day against a midnight
-boundary directly would wrongly read as "not viewing today" on the week's last day, the same class
-of off-by-time-of-day bug `checkDayRollover()` already had to account for elsewhere.
+**"Today" jump button** (`#calTodayBtn`) resets `calCursor`/`weekCursor`/`dayCursor` all at once to
+`new Date()` and re-renders — added because there was previously no quick way back to the present
+after navigating forward to plan future events, short of clicking the back arrow repeatedly.
+`isViewingToday()` decides whether it's shown at all (hidden whenever the current view already
+contains today, so it doesn't clutter the header when it'd be a no-op); its week-view check
+normalizes "now" to midnight before comparing against the (midnight-based) week-start/week-end
+bounds from `startOfWeek()` — comparing a live time-of-day against a midnight boundary directly
+would wrongly read as "not viewing today" on the week's last day, the same class of
+off-by-time-of-day bug `checkDayRollover()` already had to account for elsewhere. It lives inside
+`.cal-title-group` itself (next to the nav arrows), not in its own row alongside the view-toggle/
+add-event button — an earlier version put it there, which pushed that row onto a third header
+line on mobile once "Today" joined it, eating vertical space on a small phone screen. Inside the
+title group it just shares the row's existing shrink budget with the (already-truncating) `h2`
+label instead of adding a new row.
+
+**Calendar person filter — every chip always shows its own color, not just when selected.**
+`renderPersonFilter()` fills the "All" chip's background/text with `var(--everyone)`/
+`var(--everyone-text)` and each family member's chip with their own `color`/`textColorOf(id)` —
+unconditionally, not only while that chip is the active filter — so you can spot who's who at a
+glance the same way you'd recognize their calendar pills, without needing to tap through each one
+first. The *selected* chip is distinguished by full opacity plus a dark ring (`.pf-chip.on`);
+unselected chips sit at reduced opacity (`0.55`) so the active filter still reads clearly without
+hiding anyone's actual color. The "Everyone" label was renamed to "All" per user request — the
+underlying concept/settings name (`everyoneColor`/`everyoneTextColor`, the "Everyone" event color
+block in Settings) is unchanged, only this one chip's display text changed.
+
+On a phone-width screen, the person-filter row (`.person-filter`) gets tighter chip padding/gap
+under the same `@media (max-width:640px)` breakpoint used elsewhere — a real report of the last
+chip wrapping onto its own line for an ordinary-size family (4-5 short-to-medium first names) once
+each chip carried real padding/font instead of the old plain-white unselected look. This is a
+"buys back a couple dozen pixels" fix, not a guarantee: a genuinely long name or a larger family
+can still wrap, and that's expected/fine — the scoping is deliberately phone-only (not the iPad
+wall display this app is mainly built for), since the iPad has plenty of width and there's no
+reason to shrink its tap targets.
 
 ## Design language (established, keep consistent)
 
