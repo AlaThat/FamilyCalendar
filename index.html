@@ -761,6 +761,12 @@ function eventWeeklyInterval(evt){
   if(evt.weeklyInterval && evt.weeklyInterval > 0) return evt.weeklyInterval;
   return evt.recurrence === 'biweekly' ? 2 : 1;
 }
+function eventMonthlyInterval(evt){
+  return (evt.monthlyInterval && evt.monthlyInterval > 0) ? evt.monthlyInterval : 1;
+}
+function monthsBetween(startD, d){
+  return (d.getFullYear()-startD.getFullYear())*12 + (d.getMonth()-startD.getMonth());
+}
 function eventOccursOnDate(evt, dateISO){
   const d = new Date(dateISO+'T00:00:00');
   const startD = new Date(evt.date+'T00:00:00');
@@ -780,13 +786,17 @@ function eventOccursOnDate(evt, dateISO){
     const weeksDiff = Math.round((dWeekStart - startWeekStart) / (7*86400000));
     return weeksDiff % interval === 0;
   }
-  if(rec === 'monthly-date'){ return d.getDate() === startD.getDate(); }
+  if(rec === 'monthly-date'){
+    if(d.getDate() !== startD.getDate()) return false;
+    return monthsBetween(startD, d) % eventMonthlyInterval(evt) === 0;
+  }
   if(rec === 'monthly-weekday'){
     if(d.getDay() !== startD.getDay()) return false;
     const startIsLast = (startD.getDate() + 7) > daysInMonthOf(startD);
     const dIsLast = (d.getDate() + 7) > daysInMonthOf(d);
-    if(startIsLast) return dIsLast;
-    return Math.ceil(startD.getDate()/7) === Math.ceil(d.getDate()/7);
+    const ordinalMatches = startIsLast ? dIsLast : Math.ceil(startD.getDate()/7) === Math.ceil(d.getDate()/7);
+    if(!ordinalMatches) return false;
+    return monthsBetween(startD, d) % eventMonthlyInterval(evt) === 0;
   }
   if(rec === 'yearly'){ return d.getMonth() === startD.getMonth() && d.getDate() === startD.getDate(); }
   return false;
@@ -1010,7 +1020,11 @@ function recurrenceLabel(evt){
     const interval = eventWeeklyInterval(evt);
     return interval > 1 ? `repeats ${dayPart} every ${interval} weeks` : `repeats ${dayPart}`;
   }
-  return { 'monthly-date':'repeats monthly', 'monthly-weekday':'repeats monthly', yearly:'repeats yearly' }[rec] || '';
+  if(rec === 'monthly-date' || rec === 'monthly-weekday'){
+    const interval = eventMonthlyInterval(evt);
+    return interval > 1 ? `repeats every ${interval} months` : 'repeats monthly';
+  }
+  return rec === 'yearly' ? 'repeats yearly' : '';
 }
 
 /* ============================== TODAY TAB ============================== */
@@ -1036,7 +1050,7 @@ function reminderDueOnOrBefore(reminder, dateISO){
   if(reminder.date == null && !reminder.recurrence) return dateISO; // legacy manual reminder - always due
   if(!reminder.date || reminder.date > dateISO) return null; // not scheduled yet
   if(!reminder.recurrence || reminder.recurrence === 'none') return reminder.date;
-  const pseudoEvt = { date: reminder.date, recurrence: reminder.recurrence, weeklyDays: reminder.weeklyDays, weeklyInterval: reminder.weeklyInterval };
+  const pseudoEvt = { date: reminder.date, recurrence: reminder.recurrence, weeklyDays: reminder.weeklyDays, weeklyInterval: reminder.weeklyInterval, monthlyInterval: reminder.monthlyInterval };
   const anchor = new Date(reminder.date+'T00:00:00');
   const d = new Date(dateISO+'T00:00:00');
   for(let i=0; i<400 && d>=anchor; i++){
@@ -1646,6 +1660,7 @@ function openDayModal(iso, editEvent, scopeCtx){
   const normalizedRec = (rec==='daily'||rec==='biweekly') ? 'weekly' : rec;
   const weeklyDaysDefault = isEdit ? eventWeeklyDays(editEvent) : [new Date(iso+'T00:00:00').getDay()];
   const weeklyIntervalDefault = isEdit ? eventWeeklyInterval(editEvent) : 1;
+  const monthlyIntervalDefault = isEdit ? eventMonthlyInterval(editEvent) : 1;
 
   modalRoot.innerHTML = `
     <div class="modal-backdrop" id="backdrop">
@@ -1715,6 +1730,12 @@ function openDayModal(iso, editEvent, scopeCtx){
             week(s)</label>
         </div>
 
+        <div class="field" id="monthlyPatternField" style="${(normalizedRec==='monthly-date'||normalizedRec==='monthly-weekday')?'':'display:none;'}">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;color:var(--ink-soft);">Every
+            <input type="number" id="newEvtMonthlyInterval" min="1" max="24" value="${monthlyIntervalDefault}" style="width:56px;padding:6px;border:1px solid var(--paper-line);border-radius:6px;">
+            month(s)</label>
+        </div>
+
         <div class="field" id="endDateField" style="${normalizedRec!=='none'?'display:none;':''}"><label>Lasts through (only if more than one day — e.g. a trip)</label>
           <input type="date" id="newEvtEndDate" value="${isEdit&&editEvent.endDate&&editEvent.endDate!==editEvent.date?editEvent.endDate:''}"></div>
 
@@ -1764,6 +1785,7 @@ function openDayModal(iso, editEvent, scopeCtx){
       document.getElementById('endDateField').style.display = v==='none' ? '' : 'none';
       document.getElementById('birthYearField').style.display = v==='yearly' ? '' : 'none';
       document.getElementById('weeklyPatternField').style.display = v==='weekly' ? '' : 'none';
+      document.getElementById('monthlyPatternField').style.display = (v==='monthly-date'||v==='monthly-weekday') ? '' : 'none';
     });
   }
   const dateInput = document.getElementById('newEvtDate');
@@ -1823,16 +1845,19 @@ function openDayModal(iso, editEvent, scopeCtx){
     if(endDateVal && endDateVal < dateVal){
       showToast('The "lasts through" date can\'t be before the start date.'); return;
     }
-    let weeklyDays = null, weeklyInterval = null;
+    let weeklyDays = null, weeklyInterval = null, monthlyInterval = null;
     if(recurrence === 'weekly'){
       weeklyDays = Array.from(modalRoot.querySelectorAll('#newEvtWeeklyDays input:checked')).map(i=>parseInt(i.value,10));
       if(!weeklyDays.length){ showToast('Pick at least one day for the weekly pattern.'); return; }
       weeklyInterval = parseInt(document.getElementById('newEvtWeeklyInterval').value, 10) || 1;
       if(weeklyInterval < 1) weeklyInterval = 1;
+    } else if(recurrence === 'monthly-date' || recurrence === 'monthly-weekday'){
+      monthlyInterval = parseInt(document.getElementById('newEvtMonthlyInterval').value, 10) || 1;
+      if(monthlyInterval < 1) monthlyInterval = 1;
     }
     const birthYearRaw = recurrence==='yearly' ? document.getElementById('newEvtBirthYear').value : '';
     const birthYear = birthYearRaw ? parseInt(birthYearRaw, 10) : null;
-    const data = { title, date: dateVal, endDate: endDateVal || dateVal, allDay, startTime, endTime, recurrence, weeklyDays, weeklyInterval, birthYear, notes, assignees: Array.from(selected), workBlock };
+    const data = { title, date: dateVal, endDate: endDateVal || dateVal, allDay, startTime, endTime, recurrence, weeklyDays, weeklyInterval, monthlyInterval, birthYear, notes, assignees: Array.from(selected), workBlock };
     if(isEdit) updateEvent(editEvent.id, data); else saveEvent(data);
     closeModal();
   });
@@ -2194,6 +2219,7 @@ function openReminderModal(existing){
   const modalRoot = document.getElementById('modalRoot');
   const weeklyDaysDefault = isEdit ? eventWeeklyDays(existing) : [new Date().getDay()];
   const weeklyIntervalDefault = isEdit ? eventWeeklyInterval(existing) : 1;
+  const monthlyIntervalDefault = isEdit ? eventMonthlyInterval(existing) : 1;
   // "Daily" isn't its own stored recurrence value — it's weekly with every day checked, same
   // representation the rest of the app already uses (see daysLabel()'s "Every day" case). This
   // is purely a friendlier dropdown option: picking it hides the day-checkbox row (redundant when
@@ -2226,6 +2252,11 @@ function openReminderModal(existing){
         <input type="number" id="remWeeklyInterval" min="1" max="12" value="${weeklyIntervalDefault}" style="width:56px;padding:6px;border:1px solid var(--paper-line);border-radius:6px;">
         week(s)</label>
     </div>
+    <div class="field" id="remMonthlyField" style="${(rec==='monthly-date'||rec==='monthly-weekday')?'':'display:none;'}">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;color:var(--ink-soft);">Every
+        <input type="number" id="remMonthlyInterval" min="1" max="24" value="${monthlyIntervalDefault}" style="width:56px;padding:6px;border:1px solid var(--paper-line);border-radius:6px;">
+        month(s)</label>
+    </div>
     <div class="field"><label id="remDateLabel">${rec==='none'?'Date':'Starts on'}</label><input type="date" id="remDate" value="${dateDefault}"></div>
     <div class="modal-actions">
       <button class="btn btn-primary" id="remSave">Save</button>
@@ -2236,6 +2267,7 @@ function openReminderModal(existing){
   document.getElementById('remRepeat').addEventListener('change', (e)=>{
     const v = e.target.value;
     document.getElementById('remWeeklyField').style.display = v==='weekly' ? '' : 'none';
+    document.getElementById('remMonthlyField').style.display = (v==='monthly-date'||v==='monthly-weekday') ? '' : 'none';
     document.getElementById('remDateLabel').textContent = v==='none' ? 'Date' : 'Starts on';
   });
   document.getElementById('closeModal').addEventListener('click', closeModal);
@@ -2247,7 +2279,7 @@ function openReminderModal(existing){
     const dateVal = document.getElementById('remDate').value;
     if(!dateVal){ showToast('Pick a date.'); return; }
     const repeatVal = document.getElementById('remRepeat').value;
-    let recurrence = repeatVal, weeklyDays = null, weeklyInterval = null;
+    let recurrence = repeatVal, weeklyDays = null, weeklyInterval = null, monthlyInterval = null;
     if(repeatVal === 'daily'){
       recurrence = 'weekly'; weeklyDays = [0,1,2,3,4,5,6]; weeklyInterval = 1;
     } else if(recurrence === 'weekly'){
@@ -2255,8 +2287,11 @@ function openReminderModal(existing){
       if(!weeklyDays.length){ showToast('Pick at least one day for the weekly pattern.'); return; }
       weeklyInterval = parseInt(document.getElementById('remWeeklyInterval').value, 10) || 1;
       if(weeklyInterval < 1) weeklyInterval = 1;
+    } else if(recurrence === 'monthly-date' || recurrence === 'monthly-weekday'){
+      monthlyInterval = parseInt(document.getElementById('remMonthlyInterval').value, 10) || 1;
+      if(monthlyInterval < 1) monthlyInterval = 1;
     }
-    const data = { text, date: dateVal, recurrence, weeklyDays, weeklyInterval };
+    const data = { text, date: dateVal, recurrence, weeklyDays, weeklyInterval, monthlyInterval };
     if(isEdit && existing._legacySource === 'recurringReminders'){
       // Legacy recurring reminders live in the old `recurringReminders` collection - editing one
       // migrates it into the unified `reminders` collection instead of upgrading it in place,
