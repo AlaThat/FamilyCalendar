@@ -295,7 +295,8 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   already isn't a daily thing.
 - `earnings`: `{memberId, amount, title, date, paid}` — one row per completed pool chore
 - `events`: `{title, date, endDate, allDay, startTime, endTime, recurrence:
-  'none'|'weekly'|'monthly-date'|'monthly-weekday'|'yearly', weeklyDays, weeklyInterval, assignees:
+  'none'|'weekly'|'monthly-date'|'monthly-weekday'|'yearly', weeklyDays, weeklyInterval,
+  monthlyInterval, assignees:
   [memberId] (empty or all-members = "applies to everyone", shown in a distinct dark color; 2+
   members but not everyone shows as an equal-width multi-color gradient split, one band per
   assignee), notes, birthYear, workBlock, tag, order}` — `tag` is used to correlate with the
@@ -325,6 +326,20 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   a multi-day pattern (Mon+Thu) skips the *same* in-between week for every selected day, matching
   how Outlook's own "every N weeks" picker behaves.
 
+  **Monthly recurrence** (`recurrence==='monthly-date'|'monthly-weekday'`) similarly carries a
+  `monthlyInterval: N` (`eventMonthlyInterval()`, defaulting to 1 when unset — so pre-existing
+  monthly events/reminders with no such field keep behaving exactly as before, no migration
+  needed) — added after a real report that weekly's "every N weeks" had no monthly equivalent
+  ("we replace the air filter every 3 months, not every one," with no way to express that other
+  than picking Monthly and getting a reminder every single month). `monthsBetween(startD, d)`
+  counts whole calendar months between the pattern's start date and the date being checked
+  (`(d.year-start.year)*12 + (d.month-start.month)`, ignoring day-of-month) — `eventOccursOnDate()`
+  still requires the same-date-or-same-weekday-ordinal match it always did *and* that this month
+  count is a multiple of the interval, so "every 3 months" for `monthly-weekday` genuinely means
+  "the 1st Tuesday of every 3rd month," not just "any 1st Tuesday, loosely every quarter." The
+  Add/Edit Event and Add/Edit Reminder modals both show the same "Every N month(s)" field (mirrors
+  the weekly interval field exactly), visible for either monthly variant and hidden otherwise.
+
 - `eventExceptions`: doc id `${eventId}_${originalDate}` → `{eventId, date, deleted}` or
   `{eventId, date, deleted:false, overrides:{...any event fields...}}` — same
   composite-string-is-the-doc-id convention as `routineLog`/`choreLog`/`recurringReminderLog`, so
@@ -347,11 +362,11 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   key) specifically so editing/deleting an already-moved occurrence again still finds the right
   exception doc regardless of which date it's currently displayed on. Deleting the whole series
   also deletes its exception docs, so they don't linger as orphans. Occurrence-level edits
-  deliberately omit `recurrence`/`weeklyDays`/`weeklyInterval`/`endDate`/`birthYear` from what can
-  be overridden — those describe the *series*, not one date, so the edit form hides the Repeats
-  section entirely when editing just one occurrence.
+  deliberately omit `recurrence`/`weeklyDays`/`weeklyInterval`/`monthlyInterval`/`endDate`/
+  `birthYear` from what can be overridden — those describe the *series*, not one date, so the edit
+  form hides the Repeats section entirely when editing just one occurrence.
 - `reminders`: `{text, date, recurrence: 'none'|'weekly'|'monthly-date'|'monthly-weekday'|'yearly',
-  weeklyDays, weeklyInterval, order}` — one unified reminder concept (merged from what used to be
+  weeklyDays, weeklyInterval, monthlyInterval, order}` — one unified reminder concept (merged from what used to be
   two separate features: quick manual reminders and Settings' recurring reminders). Reuses the
   *exact* event recurrence shape (`recurrence`/`weeklyDays`/`weeklyInterval`, `date` as the
   pattern's anchor) rather than inventing a parallel scheduling model — `recurrence:'none'` means
