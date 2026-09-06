@@ -101,9 +101,17 @@
   .cal-cell{ background: var(--white); border:1px solid var(--paper-line); border-radius:8px; min-height:90px; min-width:0; padding:6px; cursor:pointer; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
   .cal-cell.other-month{ opacity:0.35; }
   .cal-cell.today{ border-color: var(--accent); border-width:2px; }
-  .cal-date-num{ font-family:"Fraunces",serif; font-weight:600; font-size:15px; }
+  .cal-date-num{ font-family:"Fraunces",serif; font-weight:600; font-size:15px; white-space:nowrap; }
   .cal-evt{ font-size:11px; padding:2px 5px; border-radius:5px; color:white; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cal-evt.allday{ border:1px dashed rgba(255,255,255,0.7); }
+  /* Small drawn moon-phase icon — a plain circle with a half-and-half fill per phase — instead of
+     an emoji glyph, which rendered inconsistently across devices and, at its natural size, was
+     wide enough to wrap onto a second line next to the date number in a narrow mobile month cell. */
+  .moon-icon{ display:inline-block; width:10px; height:10px; border-radius:50%; border:1.2px solid var(--ink); vertical-align:middle; box-sizing:border-box; margin-left:1px; }
+  .moon-icon--new{ background:var(--ink); }
+  .moon-icon--full{ background:var(--white); }
+  .moon-icon--first-quarter{ background:linear-gradient(90deg, var(--white) 50%, var(--ink) 50%); }
+  .moon-icon--last-quarter{ background:linear-gradient(90deg, var(--ink) 50%, var(--white) 50%); }
 
   /* Outlook-style time grid, shared by Week (7 columns) and Day (1 column) views — see
      renderTimeGrid(). All-day events pin to a row on top; timed events are absolutely
@@ -867,7 +875,7 @@ function computedEventsOnDate(dateISO){
   const all = usFederalHolidaysForYear(year).concat(usDstChangesForYear(year)).concat(seasonsForYear(year));
   return all.filter(h => h.date === dateISO).map(h => toReadOnlyCalendarEntry(h.date, h.title));
 }
-const MOON_PHASE_TARGETS = [ [0,'🌑','New Moon'], [0.25,'🌓','First Quarter'], [0.5,'🌕','Full Moon'], [0.75,'🌗','Last Quarter'] ];
+const MOON_PHASE_TARGETS = [ [0,'new','New Moon'], [0.25,'first-quarter','First Quarter'], [0.5,'full','Full Moon'], [0.75,'last-quarter','Last Quarter'] ];
 function moonPhaseFraction(dateISO){
   const SYNODIC_DAYS = 29.530588853;
   const KNOWN_NEW_MOON_UTC = Date.UTC(2000,0,6,18,14,0);
@@ -890,7 +898,11 @@ function moonPhaseIconForDate(dateISO){
 }
 function moonBadge(dateISO){
   const phase = moonPhaseIconForDate(dateISO);
-  return phase ? ` <span class="moon-badge" title="${esc(phase.name)}">${phase.icon}</span>` : '';
+  // A small drawn circle (border + half-and-half fill per phase) instead of the platform's moon
+  // emoji — those render inconsistently sized/colored across devices and, at their natural emoji
+  // size, were wide enough to wrap on to a second line next to the date number in a narrow mobile
+  // month-view cell (see .cal-date-num's white-space:nowrap below, added alongside this).
+  return phase ? ` <span class="moon-icon moon-icon--${phase.icon}" title="${esc(phase.name)}"></span>` : '';
 }
 function sortEventsForDisplay(events){
   return events.slice().sort((a,b)=>{
@@ -1352,7 +1364,12 @@ function renderCalendarHeader(){
       ? `${start.toLocaleDateString(undefined,{month:'long'})} ${start.getDate()}–${end.getDate()}, ${end.getFullYear()}`
       : `${start.toLocaleDateString(undefined,{month:'short',day:'numeric'})} – ${end.toLocaleDateString(undefined,{month:'short',day:'numeric'})}, ${end.getFullYear()}`;
   } else {
-    label.textContent = dayCursor.toLocaleDateString(undefined,{weekday:'long', month:'long', day:'numeric', year:'numeric'});
+    // Full "Saturday, September 5, 2026" comfortably fits next to the nav arrows/Today button
+    // on a wide screen, but on a phone it was crowding that whole row even after truncating with
+    // an ellipsis. Below 640px, use a short form ("Sat, Sep 5") instead of just truncating more.
+    label.textContent = window.matchMedia('(max-width: 640px)').matches
+      ? dayCursor.toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'})
+      : dayCursor.toLocaleDateString(undefined,{weekday:'long', month:'long', day:'numeric', year:'numeric'});
   }
   document.getElementById('calTodayBtn').classList.toggle('hidden', isViewingToday());
 }

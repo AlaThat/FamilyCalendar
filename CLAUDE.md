@@ -413,12 +413,28 @@ Sunday in November) are computed fresh from date math in `computedEventsOnDate()
 into `eventsOnDate()` as read-only "everyone" all-day entries (`holiday:true`). They're never
 written to Firestore, need no yearly upkeep, and can't be edited or deleted — `findEventById`
 only searches real `state.events`, so tapping one just opens that day's list, same as tapping
-empty cell space. Moon phase icons (🌑🌓🌕🌗, only on the 4 exact phase days each cycle — not
-every day) are separate: computed per-date by `moonPhaseIconForDate()` and shown next to the
-date number in Month/Week views, not injected as calendar entries. If any of this is ever
-revisited, get explicit scope from the user first (which holiday set, on-by-default vs. a
-toggle, how moon phases should display) — guessing on exactly this cost a full round-trip
-once already (see the Home Screen chrome saga above).
+empty cell space. Moon phase icons (only on the 4 exact phase days each cycle — not every day)
+are separate: computed per-date by `moonPhaseIconForDate()` and shown next to the date number in
+Month/Week views, not injected as calendar entries. If any of this is ever revisited, get explicit
+scope from the user first (which holiday set, on-by-default vs. a toggle, how moon phases should
+display) — guessing on exactly this cost a full round-trip once already (see the Home Screen
+chrome saga above).
+
+**Moon phase icons are small drawn circles (`.moon-icon`), not emoji, and this was a real bug
+fix, not a style preference.** `MOON_PHASE_TARGETS` used to pair each phase fraction with an emoji
+glyph (🌑🌓🌕🌗) that `moonBadge()` dropped straight into the day cell as text. Two real, reported
+problems with that: emoji rendering is inconsistent across devices/fonts, and — more concretely —
+the emoji's natural rendered size was wide enough that, in a narrow mobile month-view cell, the
+date number + emoji would wrap onto two lines instead of staying inline next to each other.
+`MOON_PHASE_TARGETS` now pairs each phase fraction with a plain string key (`'new'`,
+`'first-quarter'`, `'full'`, `'last-quarter'`) and `moonBadge()` renders an empty
+`<span class="moon-icon moon-icon--{key}">` that CSS draws as a small bordered circle with a
+half-and-half (or fully filled/empty) background per phase — a fixed, small, predictable size
+regardless of platform. `.cal-date-num` also got `white-space:nowrap` alongside this, since that
+was the other half of the fix: even a small icon can still wrap without it. If a "wrapped onto two
+lines" or "icon looks huge/wrong on my phone" report comes up again for anything living inside a
+`.cal-date-num`, check for a missing `white-space:nowrap` or a raw emoji glyph before assuming
+something new broke.
 
 Recurrence + multi-day (`endDate`) are mutually exclusive in the current implementation —
 recurring events are treated as single-day only. This is a known simplification, not a bug.
@@ -455,6 +471,14 @@ instead, which fixed the wrap but caused a *worse* bug: on a narrow phone the gr
 run out of room and the next-arrow would visually overlap/hide behind the view-toggle instead of
 wrapping cleanly. Wide screens are unaffected — the trio still shares one row with the
 view-toggle/add-button there, exactly as before.
+
+Truncating the label with an ellipsis only went so far, though — with the nav arrows AND the
+Today button all sharing that one row on a phone, even a truncated "Sunday, Septem…" still
+crowded the row uncomfortably (a real follow-up report). Below 640px, Day view's label switches
+to a short form (`{weekday:'short', month:'short', day:'numeric'}` → "Sat, Sep 5") instead of the
+full long form, via `window.matchMedia('(max-width: 640px)').matches` checked directly inside
+`renderCalendarHeader()`. Desktop/wide screens keep the full "Saturday, September 5, 2026" form
+unchanged — there's no crowding problem there to solve, so no reason to lose the extra detail.
 
 **Time-grid columns: `min-width:0` alone wasn't enough on real iPhone Safari.** `.allday-col` and
 `.time-col` already had `flex:1; min-width:0` (the textbook fix for a flex item refusing to
