@@ -1063,6 +1063,10 @@ function reminderDueOnOrBefore(reminder, dateISO){
 function reminderRecurrenceSummary(reminder){
   return (reminder.recurrence && reminder.recurrence !== 'none') ? recurrenceLabel(reminder) : '';
 }
+/* Defaults to true (same fallback-on-read pattern as everywhere else in this app) so every
+   reminder created before this field existed keeps the original always-tracked behavior — only
+   an explicit false (set via the modal's checkbox) turns tracking off. */
+function reminderTracksCalendar(reminder){ return reminder.trackOnCalendar !== false; }
 function renderReminders(){
   const el = document.getElementById('reminderList');
   const today = todayISO();
@@ -1094,34 +1098,45 @@ function deleteReminder(id){
   removeDoc(r._legacySource === 'recurringReminders' ? 'recurringReminders' : 'reminders', id);
 }
 /* Checking a reminder off logs its completion (keyed by which scheduled occurrence it satisfies,
-   so a recurring reminder becomes outstanding again next time it's due) and drops a small
-   read/write calendar event on the day it was actually completed — found by title+date match
-   rather than a stored id, since the optimistic local id for a brand-new event gets superseded
-   by Firestore's real id as soon as the live listener catches up. */
+   so a recurring reminder becomes outstanding again next time it's due) and, if the reminder has
+   calendar tracking turned on (reminderTracksCalendar — default true, opt out per-reminder via
+   the modal's checkbox), drops a small read/write calendar event on the day it was actually
+   completed — found by title+date match rather than a stored id, since the optimistic local id
+   for a brand-new event gets superseded by Firestore's real id as soon as the live listener
+   catches up. Added because logging a "✓ done" note for every single day of a daily/weekly
+   reminder (feed the cat, take out the garbage) was cluttering the calendar in a way that isn't
+   useful, while an infrequent one (replace the air filter) is exactly the kind of thing worth
+   being able to look back and see when it was last done. */
 function toggleReminder(reminderId, due){
   const reminder = findReminderById(reminderId);
   if(!reminder) return;
   const key = `${reminderId}_${due}`;
   const today = todayISO();
+  const tracksCalendar = reminderTracksCalendar(reminder);
   const existing = state.reminderCompletions[key];
   if(existing && existing.completedDate === today){
     delete state.reminderCompletions[key];
-    const evt = state.events.find(e => e.allDay && e.date === existing.completedDate && e.title === '✓ '+reminder.text);
-    if(evt){
-      state.events = state.events.filter(e=>e.id!==evt.id);
-      if(firebaseReady && !String(evt.id).startsWith('local')) dbWrite(hdb('events').doc(evt.id).delete());
+    if(tracksCalendar){
+      const evt = state.events.find(e => e.allDay && e.date === existing.completedDate && e.title === '✓ '+reminder.text);
+      if(evt){
+        state.events = state.events.filter(e=>e.id!==evt.id);
+        if(firebaseReady && !String(evt.id).startsWith('local')) dbWrite(hdb('events').doc(evt.id).delete());
+      }
     }
     renderAll();
     if(firebaseReady) dbWrite(hdb('reminderCompletions').doc(key).delete());
   } else {
     const compData = { reminderId, occurrenceDate: due, completedDate: today };
     state.reminderCompletions[key] = { id:key, ...compData };
-    const evtData = { title:'✓ '+reminder.text, date:today, endDate:today, allDay:true, startTime:'', endTime:'', recurrence:'none', weeklyDays:null, weeklyInterval:null, birthYear:null, notes:'', assignees:[], workBlock:false, order:Date.now() };
-    state.events.push({ id: uid('local'), ...evtData });
+    let evtData = null;
+    if(tracksCalendar){
+      evtData = { title:'✓ '+reminder.text, date:today, endDate:today, allDay:true, startTime:'', endTime:'', recurrence:'none', weeklyDays:null, weeklyInterval:null, monthlyInterval:null, birthYear:null, notes:'', assignees:[], workBlock:false, order:Date.now() };
+      state.events.push({ id: uid('local'), ...evtData });
+    }
     renderAll();
     if(firebaseReady){
       dbWrite(hdb('reminderCompletions').doc(key).set(compData));
-      dbWrite(hdb('events').add(evtData));
+      if(evtData) dbWrite(hdb('events').add(evtData));
     }
   }
 }
@@ -2229,6 +2244,7 @@ function openReminderModal(existing){
     && [0,1,2,3,4,5,6].every(d => weeklyDaysDefault.includes(d));
   const rec = isEdit ? (isDaily ? 'daily' : (existing.recurrence || 'none')) : 'none';
   const dateDefault = isEdit ? (existing.date || todayISO()) : todayISO();
+  const trackCalendarDefault = isEdit ? reminderTracksCalendar(existing) : true;
   modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">
     <button class="close-x" id="closeModal">✕</button>
     <h3>${isEdit?'Edit reminder':'Add reminder'}</h3>
@@ -2258,6 +2274,8 @@ function openReminderModal(existing){
         month(s)</label>
     </div>
     <div class="field"><label id="remDateLabel">${rec==='none'?'Date':'Starts on'}</label><input type="date" id="remDate" value="${dateDefault}"></div>
+    <div class="checkbox-row"><input type="checkbox" id="remTrackCalendar" ${trackCalendarDefault?'checked':''}><label for="remTrackCalendar">Add a "✓ done" note on the calendar when checked off</label></div>
+    <p class="section-sub" style="margin-top:-10px;">Good for things worth looking back on later (replace the air filter). Turn this off for everyday things (feed the cat) so they don't clutter the calendar.</p>
     <div class="modal-actions">
       <button class="btn btn-primary" id="remSave">Save</button>
       ${isEdit?'<button class="btn btn-danger" id="remDelete">Remove</button>':''}
@@ -2291,7 +2309,8 @@ function openReminderModal(existing){
       monthlyInterval = parseInt(document.getElementById('remMonthlyInterval').value, 10) || 1;
       if(monthlyInterval < 1) monthlyInterval = 1;
     }
-    const data = { text, date: dateVal, recurrence, weeklyDays, weeklyInterval, monthlyInterval };
+    const trackOnCalendar = document.getElementById('remTrackCalendar').checked;
+    const data = { text, date: dateVal, recurrence, weeklyDays, weeklyInterval, monthlyInterval, trackOnCalendar };
     if(isEdit && existing._legacySource === 'recurringReminders'){
       // Legacy recurring reminders live in the old `recurringReminders` collection - editing one
       // migrates it into the unified `reminders` collection instead of upgrading it in place,

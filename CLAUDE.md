@@ -366,7 +366,7 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   `birthYear` from what can be overridden — those describe the *series*, not one date, so the edit
   form hides the Repeats section entirely when editing just one occurrence.
 - `reminders`: `{text, date, recurrence: 'none'|'weekly'|'monthly-date'|'monthly-weekday'|'yearly',
-  weeklyDays, weeklyInterval, monthlyInterval, order}` — one unified reminder concept (merged from what used to be
+  weeklyDays, weeklyInterval, monthlyInterval, trackOnCalendar, order}` — one unified reminder concept (merged from what used to be
   two separate features: quick manual reminders and Settings' recurring reminders). Reuses the
   *exact* event recurrence shape (`recurrence`/`weeklyDays`/`weeklyInterval`, `date` as the
   pattern's anchor) rather than inventing a parallel scheduling model — `recurrence:'none'` means
@@ -408,6 +408,18 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   when the whole reminder's completion is cleared) by title+date match rather than a stored id,
   since a brand-new event's optimistic local id gets superseded by Firestore's real id as soon as
   the live listener catches up — content-matching sidesteps that race entirely.
+
+  **This calendar note is opt-out per reminder (`trackOnCalendar`, default `true` via
+  `reminderTracksCalendar()`), not automatic for every reminder.** A daily/weekly reminder like
+  "feed the cat" or "take out the garbage" would drop a new calendar event essentially every day
+  — real, reported clutter with no real value (nobody needs to look back and confirm the cat was
+  fed on a specific Tuesday). An infrequent one like "replace the air filter" is exactly the
+  opposite: the whole point is being able to see when it was last done. The Add/Edit Reminder
+  modal's checkbox controls this per reminder; `toggleReminder()` still always writes/removes the
+  `reminderCompletions` doc regardless (that's what drives the due/outstanding state itself), it
+  just skips the calendar-event create/find/delete steps when tracking is off. Legacy reminders
+  saved before this field existed have no `trackOnCalendar` at all, which reads as `true` — same
+  fallback-on-read pattern as the rest of this app, so nothing already on the calendar changes.
 
   Legacy docs from before this redesign are read through the same never-migrated fallback pattern
   used everywhere else in this app: a plain old-shape manual reminder (`{text, done, order}`, no
