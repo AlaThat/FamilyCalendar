@@ -60,6 +60,19 @@ thing you can do first — it will likely surface real bugs that were never actu
   this app's code — and it isn't reliably fixable from the web-app side. Don't re-add this meta
   tag without first confirming (via current, dated sources, not assumption) that Apple has
   actually fixed the underlying bug on the iPadOS version this device is capped at.
+- **`touch-action: manipulation` on `html,body`** fixes a real reported bug: an ordinary tap on
+  the iPad occasionally registered as the start of a double-tap, triggering iOS's built-in
+  double-tap-to-zoom and zooming the whole page in. The viewport meta tag's
+  `maximum-scale=1.0, user-scalable=no` does NOT control this — iOS Safari has ignored those two
+  attributes for pinch-zoom purposes since iOS 10 (an Apple accessibility change, confirmed still
+  true on iOS 15) and never governed double-tap-zoom at all, which is a separate gesture
+  controlled by `touch-action`. `manipulation` is also the one value iOS Safari actually
+  implements correctly — per WebKit's own bug tracker, iOS Safari only supports `auto`/
+  `manipulation`, not finer-grained values like `pan-x`/`none` — and it's specifically defined to
+  keep panning/scrolling *and* pinch-zoom working while disabling double-tap-zoom, matching
+  exactly what was asked for ("pinch zoom as needed, no accidental double-tap zoom"). If a zoom
+  or tap-responsiveness complaint comes up again, check this is still in place before assuming
+  something new broke.
 - **Importing/subscribing to external calendars (e.g. a partner's calendar feed) was explicitly
   deferred**: browsers block direct cross-origin fetches of arbitrary ICS URLs, so this needs a
   server-side fetch — which means enabling Firebase's paid Blaze plan (usage would stay in the
