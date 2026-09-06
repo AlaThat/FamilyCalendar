@@ -356,9 +356,20 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   *exact* event recurrence shape (`recurrence`/`weeklyDays`/`weeklyInterval`, `date` as the
   pattern's anchor) rather than inventing a parallel scheduling model — `recurrence:'none'` means
   one-time, due on `date` itself, same convention as events. The Add Reminder modal (one
-  `openReminderModal()` for both add and edit, reached only from the Reminders tab — Settings no
-  longer has a separate recurring-reminders section) defaults to one-time, dated today, so a quick
-  add is still just as fast as the old manual-reminder flow.
+  `openReminderModal()` for both add and edit) defaults to one-time, dated today, so a quick add
+  from the Reminders tab is still just as fast as the old manual-reminder flow.
+
+  **"Daily" in the Repeats dropdown is a form-only convenience, not a stored value.** The events
+  recurrence redesign deliberately removed a separate `'daily'` value in favor of weekly-with-
+  every-day-checked (see the events section above) — reminders' dropdown originally only offered
+  Weekly/Monthly/Yearly for the same reason, but that left a real reported gap: adding something
+  like "feed the cat" required knowing to pick Weekly and then manually check all 7 day boxes,
+  with nothing in the UI hinting that's how you'd get "every day." `openReminderModal()` now has a
+  `Daily` option that, on save, writes exactly `recurrence:'weekly', weeklyDays:[0,1,2,3,4,5,6]` —
+  the same shape a hand-checked "every day" Weekly reminder would produce, so nothing about the
+  data model changed. Reopening a reminder that already has that exact shape shows `Daily` selected
+  again (detected by checking all 7 days are present), not `Weekly`, so it round-trips cleanly; the
+  day-checkbox row stays hidden whenever `Daily` is selected since every day is already implied.
 
   **Reminders don't reset daily like routines/chores — they persist until done, then clear
   overnight.** Once a reminder's scheduled date arrives, it stays outstanding on the Reminders tab
@@ -394,6 +405,34 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   add to the new one) rather than upgrading it in place, since — unlike routines/chores' legacy
   fallback, which stays within one collection — this one predates the two-collections-into-one
   merge.
+
+  **Settings has its own always-visible "Reminders" management list — this closes a real bug, not
+  just symmetry with Routines/Chores.** `renderReminders()` (the Reminders tab) filters to only
+  what `reminderDueOnOrBefore()` says is currently outstanding, by design — but that meant a
+  reminder that ISN'T due right now was completely unreachable anywhere in the UI: no way to edit
+  or delete it. Concretely, a Tue/Thu/Sat reminder checked off on Saturday would vanish from the
+  tab and stay unreachable until the following Tuesday; a one-time reminder dated next week was
+  equally invisible until that day arrived. Settings' "Reminders" block (`#settingsReminderList`,
+  rendered inside `renderSettings()`) lists `allReminders()` unconditionally — due or not, one-time
+  or recurring — with the same Edit/Delete/reorder controls as Routines/Chores, so every reminder
+  is always reachable. The Reminders tab itself is unchanged: still the due-today checklist plus
+  the fast "+Add" for one-off items, exactly as before — Settings only adds a second, always-
+  available surface for management, it doesn't replace the tab's own Edit/Delete/reorder controls
+  (which still work fine on the days a recurring reminder happens to be showing there too).
+
+  **`moveInList()`'s legacy-collection bug, surfaced by building the list above.** Reordering a
+  reminder normalized from `recurringReminders` (see above) kept the same doc `id` but actually
+  lives in a different Firestore collection than `reminders` — `moveInList('reminders', ...)`
+  always read/wrote `state.reminders`/`hdb('reminders')` regardless, so reordering a legacy item
+  silently failed to persist (a "no document to update" error) and never touched its real order in
+  `state.recurringReminders`. This bug already existed on the Reminders tab's own reorder arrows,
+  it just rarely got exercised since a legacy item mixed among currently-due reminders is rare;
+  making every reminder always visible in Settings made it much more likely to hit. Fixed by having
+  `moveInList()` resolve the real target collection per item (`item._legacySource ||
+  collectionName`), the same fallback `deleteReminder()` already used. This function is shared by
+  every reorderable list in the app (family, routines, chores, events, reminders) — only items that
+  set `_legacySource` (currently just normalized legacy reminders) are affected; everything else
+  behaves exactly as before.
 - `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly', workEmailTo,
   everyoneColor, everyoneTextColor}`. `everyoneColor`/`everyoneTextColor` (hex strings, default
   `#3A362C`/`#FFFFFF`, same fallback-on-read pattern as the rest of `settings/main`) are the
