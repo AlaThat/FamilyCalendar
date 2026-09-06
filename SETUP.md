@@ -136,6 +136,12 @@ screen — a real, long-standing WebKit bug in standalone home-screen web apps o
 across iOS 15 through at least 18), not something specific to this app's code. Reverted, and
 should stay reverted unless Apple has actually fixed the underlying bug — see CLAUDE.md.
 
+**A tap shouldn't zoom the screen in.** If a tap ever seems to register as a double-tap and zooms
+the page in, that shouldn't happen — the app tells the browser to only pan/scroll and pinch-zoom
+on a touch, never double-tap-zoom (`touch-action: manipulation`). Pinch-zoom itself still works
+whenever you actually want it. If this ever regresses, it's a CSS property (see CLAUDE.md), not a
+setting on the iPad itself.
+
 ## 5. (Optional) Work calendar blocking via email + Power Automate
 
 Skip this section entirely if you don't want the "Add to work calendar" checkbox to actually touch Outlook yet — the app works fine without it.

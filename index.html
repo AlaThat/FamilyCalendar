@@ -22,9 +22,22 @@
     --accent: #B5542C; --white: #FFFDF8; --radius: 10px; --everyone: #3A362C; --everyone-text: #FFFFFF;
   }
   *{ box-sizing: border-box; }
+  /* touch-action:manipulation fixes a real reported bug: a normal tap on the iPad was
+     occasionally registering as the start of a double-tap, triggering iOS's built-in
+     double-tap-to-zoom gesture and zooming the whole page in. The viewport meta tag's
+     maximum-scale=1/user-scalable=no above does NOT prevent this — iOS Safari has ignored those
+     for pinch-zoom purposes since iOS 10 (an Apple accessibility change, ✓ confirmed still true
+     on iOS 15) and never controlled double-tap-zoom in the first place, which is a separate
+     gesture governed by touch-action. `manipulation` is the one value iOS Safari actually
+     implements correctly (it only supports `auto`/`manipulation`, not finer-grained values like
+     `pan-x`) and is specifically defined to keep panning/scrolling AND pinch-zoom working while
+     disabling double-tap-zoom — exactly "pinch zoom as needed, no accidental double-tap zoom."
+     As a side effect it also removes the ~300ms tap delay browsers otherwise add while waiting to
+     see if a second tap arrives, so taps should feel snappier too. */
   html,body{ margin:0; padding:0; height:100%; background: var(--paper); color: var(--ink);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
+    -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; overflow-x: hidden;
+    touch-action: manipulation; }
   #app{ display:flex; flex-direction:column; height:100vh; height:100dvh; }
 
   /* Bottom nav */
