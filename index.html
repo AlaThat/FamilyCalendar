@@ -114,9 +114,15 @@
   .cal-cell{ background: var(--white); border:1px solid var(--paper-line); border-radius:8px; min-height:90px; min-width:0; padding:6px; cursor:pointer; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
   .cal-cell.other-month{ opacity:0.35; }
   .cal-cell.today{ border-color: var(--accent); border-width:2px; }
+  .cal-cell-top-row{ display:flex; align-items:flex-start; justify-content:space-between; gap:4px; }
   .cal-date-num{ font-family:"Fraunces",serif; font-weight:600; font-size:15px; white-space:nowrap; }
   .cal-evt{ font-size:11px; padding:2px 5px; border-radius:5px; color:white; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cal-evt.allday{ border:1px dashed rgba(255,255,255,0.7); }
+  /* Small drawn egg-count badge — same reasoning as .moon-icon (predictable size, no emoji
+     variance) but deliberately its OWN corner, not next to the date number: a day the moon icon
+     also lands on (common, since eggs get logged daily but the moon icon only ~4 days a cycle)
+     would crowd that already-tight spot otherwise — see eggBadge(). */
+  .egg-badge{ display:inline-flex; align-items:center; justify-content:center; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:#C08A2E; color:white; font-size:10px; font-weight:700; line-height:1; flex-shrink:0; margin-top:1px; }
   /* Small drawn moon-phase icon — a plain circle with a half-and-half fill per phase — instead of
      an emoji glyph, which rendered inconsistently across devices and, at its natural size, was
      wide enough to wrap onto a second line next to the date number in a narrow mobile month cell. */
@@ -156,6 +162,15 @@
   .time-evt-time{ font-size:10px; opacity:0.9; }
   .now-line{ position:absolute; left:0; right:0; height:2px; background:var(--accent); z-index:3; pointer-events:none; }
   .now-line::before{ content:''; position:absolute; left:-4px; top:-3px; width:8px; height:8px; border-radius:50%; background:var(--accent); }
+  /* Egg-count stepper — Day view only. Lives above the all-day row so correcting a day you forgot
+     to log is just navigating Day view back to it, same as any other date-scoped data here. */
+  .egg-stepper{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:8px 10px; margin-bottom:8px; background:var(--white); border:1px solid var(--paper-line); border-radius:8px; flex-shrink:0; }
+  .egg-stepper-label{ font-weight:700; font-size:14px; }
+  .egg-stepper-controls{ display:flex; align-items:center; gap:10px; }
+  .egg-step-btn{ width:34px; height:34px; border-radius:8px; border:1px solid var(--paper-line); background:var(--paper); font-size:18px; font-weight:700; cursor:pointer; }
+  .egg-step-btn:disabled{ opacity:0.35; cursor:default; }
+  .egg-stepper-count{ font-family:"Fraunces",serif; font-weight:700; font-size:18px; min-width:24px; text-align:center; display:inline-block; }
+  .egg-stepper-total{ font-size:12px; color:var(--ink-soft); font-weight:600; }
 
   .modal-backdrop{ position:fixed; inset:0; background:rgba(44,42,36,0.45); display:flex; align-items:center; justify-content:center; z-index:50; padding:20px; }
   .modal{ background: var(--white); border-radius: 14px; padding:22px; width:100%; max-width:460px; max-height:88vh; overflow-y:auto; }
@@ -591,7 +606,7 @@ if(firebaseReady){
 const state = {
   householdId: null,
   family: [], routines: [], routineLog: {}, chores: [], choreLog: {}, earnings: [], events: [], eventExceptions: {}, reminders: [],
-  recurringReminders: [], reminderCompletions: {}, inviteCodes: [],
+  recurringReminders: [], reminderCompletions: {}, inviteCodes: [], eggLog: {},
   settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '', everyoneColor: '#3A362C', everyoneTextColor: '#FFFFFF' }
 };
 /* Every family's data (family members, routines, events, etc.) lives under
@@ -712,6 +727,11 @@ function initFirestoreListeners(){
   watchCollection('reminderCompletions', rows => {
     state.reminderCompletions = {};
     rows.forEach(r => state.reminderCompletions[`${r.reminderId}_${r.occurrenceDate}`] = r);
+    renderAll();
+  });
+  watchCollection('eggLog', rows => {
+    state.eggLog = {};
+    rows.forEach(r => { state.eggLog[r.date] = r.count; });
     renderAll();
   });
   subscribeRoutineLog();
@@ -932,6 +952,30 @@ function moonBadge(dateISO){
   // size, were wide enough to wrap on to a second line next to the date number in a narrow mobile
   // month-view cell (see .cal-date-num's white-space:nowrap below, added alongside this).
   return phase ? ` <span class="moon-icon moon-icon--${phase.icon}" title="${esc(phase.name)}"></span>` : '';
+}
+/* Egg count tracking — one plain number per calendar day (households/{id}/eggLog/{dateISO}
+   → {date, count}), not tied to any one family member. The doc id IS the date, so writes are a
+   plain upsert with no existence check, same composite-key convention as routineLog/choreLog.
+   Deliberately a whole-collection listener (not date-scoped like routineLog/choreLog) since the
+   Month/Week badges and the running year total both need every day's count, not just today's. */
+function eggBadge(dateISO){
+  const count = state.eggLog[dateISO];
+  // A small drawn badge, same reasoning as moonBadge() above (predictable size, no emoji
+  // variance) — and deliberately NOT placed next to the date number/moon icon: on a day both
+  // land on (common, since eggs get logged daily but the moon icon only ~4 days a cycle), cramming
+  // a third thing into that already-tight spot risks the exact mobile wrapping bug moonBadge()
+  // was built to avoid. It gets its own corner instead — see .cal-cell-top-row/.week-day-head-row.
+  return count ? `<span class="egg-badge" title="${count} egg${count===1?'':'s'} collected">${count}</span>` : '';
+}
+function eggTotalForYear(year){
+  const prefix = String(year) + '-';
+  return Object.keys(state.eggLog).reduce((sum, date) => date.startsWith(prefix) ? sum + (state.eggLog[date]||0) : sum, 0);
+}
+function setEggCount(dateISO, count){
+  count = Math.max(0, count);
+  state.eggLog[dateISO] = count;
+  renderAll();
+  if(firebaseReady) dbWrite(hdb('eggLog').doc(dateISO).set({ date: dateISO, count }));
 }
 function sortEventsForDisplay(events){
   return events.slice().sort((a,b)=>{
@@ -1513,7 +1557,7 @@ function renderMonthGrid(){
     const dayEvents = eventsOnDateFiltered(iso);
     const evtHtml = dayEvents.slice(0,3).map(e=> `<div class="cal-evt ${e.allDay?'allday':''}" data-event-id="${e.id}" style="background:${eventColor(e)};color:${eventTextColor(e)}">${esc(displayEventTitle(e, iso))}${!e.allDay&&e.startTime?` <strong>${esc(formatTime12(e.startTime))}</strong>`:''}</div>`).join('');
     cells += `<div class="cal-cell ${monthOffset!==0?'other-month':''} ${isToday?'today':''}" data-date="${iso}">
-      <div class="cal-date-num">${dayNum}${moonBadge(iso)}</div>${evtHtml}
+      <div class="cal-cell-top-row"><div class="cal-date-num">${dayNum}${moonBadge(iso)}</div>${eggBadge(iso)}</div>${evtHtml}
       ${dayEvents.length>3?`<div style="font-size:11px;color:var(--ink-soft)">+${dayEvents.length-3} more</div>`:''}
     </div>`;
   }
@@ -1597,7 +1641,7 @@ function renderTimeGrid(dates){
     const d = new Date(iso+'T00:00:00');
     const alldayEvts = eventsOnDateFiltered(iso).filter(e=>e.allDay);
     return `<div class="allday-col" data-date="${iso}">
-      ${showHeaders ? `<div class="week-day-head ${iso===today?'today':''}">${DOW[d.getDay()]}<span class="cal-date-num">${d.getDate()}${moonBadge(iso)}</span></div>` : ''}
+      ${showHeaders ? `<div class="week-day-head ${iso===today?'today':''}">${DOW[d.getDay()]}<span class="cal-date-num">${d.getDate()}${moonBadge(iso)}</span>${eggBadge(iso)}</div>` : ''}
       ${alldayEvts.map(e=>alldayPillHtml(e, iso)).join('')}
     </div>`;
   }).join('');
@@ -1612,7 +1656,27 @@ function renderTimeGrid(dates){
     </div>`;
   }).join('');
 
+  // Egg-count stepper — Day view only (not Week, which has 7 columns and no single "this day" to
+  // tally against). Living here rather than a fixed "today" widget means correcting a day you
+  // forgot to log is just navigating back to it, same as any other Day-view data — no separate
+  // "edit a past day" mechanism needed.
+  const eggStepperHtml = dates.length === 1 ? (() => {
+    const iso = dates[0];
+    const count = state.eggLog[iso] || 0;
+    const yearTotal = eggTotalForYear(new Date(iso+'T00:00:00').getFullYear());
+    return `<div class="egg-stepper">
+      <span class="egg-stepper-label">🥚 Eggs collected</span>
+      <div class="egg-stepper-controls">
+        <button class="egg-step-btn" id="eggStepDown" ${count<=0?'disabled':''}>−</button>
+        <span class="egg-stepper-count">${count}</span>
+        <button class="egg-step-btn" id="eggStepUp">+</button>
+      </div>
+      <span class="egg-stepper-total">${yearTotal} this year</span>
+    </div>`;
+  })() : '';
+
   grid.innerHTML = `<div class="time-grid-wrap">
+    ${eggStepperHtml}
     <div class="allday-row"><div class="hour-axis-spacer"></div>${alldayColsHtml}</div>
     <div class="time-grid-scroll"><div class="time-grid-inner" style="height:${24*TIME_GRID_HOUR_HEIGHT}px">
       <div class="hour-axis">${hourAxisHtml()}</div>
@@ -1628,6 +1692,12 @@ function renderTimeGrid(dates){
     const pill = ev.target.closest('.time-evt');
     openEventForEdit(pill && pill.dataset.eventId, col.dataset.date);
   }));
+  if(dates.length === 1){
+    const iso = dates[0];
+    const upBtn = document.getElementById('eggStepUp'), downBtn = document.getElementById('eggStepDown');
+    if(upBtn) upBtn.addEventListener('click', ()=> setEggCount(iso, (state.eggLog[iso]||0) + 1));
+    if(downBtn) downBtn.addEventListener('click', ()=> setEggCount(iso, (state.eggLog[iso]||0) - 1));
+  }
 
   // Always open to the same 5am-ish start rather than drifting with the current time of day —
   // the full 24h grid is still there via scroll for an early flight or a late event.
