@@ -524,16 +524,22 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
 - `shoppingList`: `{text, done, order, createdAt}` — one flat list, no per-item scheduling or
   assignment. Added per a real request (the user's husband wanted a place to add items that
   "persist until we check them off when we get them") — the defining behavior that distinguishes
-  this from every other checkbox list in the app is that it does **not** reset daily the way
-  `routineLog`/`choreLog`/`reminderCompletions` do: an item added today is still sitting there,
-  unchecked, next week if nobody's been to the store yet. Checking an item off
+  this from every other checkbox list in the app is that **unchecked** items do **not** reset
+  daily the way `routineLog`/`choreLog`/`reminderCompletions` do: an item added today is still
+  sitting there, unchecked, next week if nobody's been to the store yet. Checking an item off
   (`toggleShoppingItem()`) marks `done:true` — rendered with strikethrough and sorted to the
   bottom of the list (unchecked items first) so what's still needed stays visible while walking
-  the aisles — rather than deleting it immediately. This mirrors the Reminders tab's
-  check-then-separately-delete pattern (a `del-x` ✕ button removes it for good via the shared
-  `removeDoc()`) on purpose: this household has a 3- and 5-year-old, and an accidental tap
-  shouldn't silently and irreversibly drop an item off the list with no undo. The quick-add is a
-  plain `<form>` + text input (`#shoppingAddForm`/`#shoppingInput`) rather than a modal — unlike
+  the aisles — rather than deleting it immediately, so an accidental tap by this household's 3-
+  or 5-year-old doesn't silently and irreversibly drop an item with no undo for the rest of that
+  trip. **Checked items then clear automatically overnight**, on explicit user request — the same
+  day-boundary "reset" reminders already use, via `clearCheckedShoppingItems()` (deletes every
+  `done:true` item, locally and in Firestore) called from `checkDayRollover()` right alongside
+  `subscribeRoutineLog()`/`subscribeChoreLog()`. Unlike a reminder's overnight clear, this is a
+  real delete, not just a stale completion being hidden — there's no "due again next time"
+  concept for a shopping item once it's bought, so nothing needs to be kept around for later. A
+  manual `del-x` ✕ button (via the shared `removeDoc()`) still exists for removing an item before
+  it's ever checked off (added by mistake, no longer needed). The quick-add is a plain `<form>` +
+  text input (`#shoppingAddForm`/`#shoppingInput`) rather than a modal — unlike
   routines/chores/reminders/events, a shopping item has exactly one field worth entering (its
   name), so a modal would just be friction for what's meant to be a fast "add it before I forget"
   action, submittable by Enter as well as tapping "+ Add". There's no reordering UI (no

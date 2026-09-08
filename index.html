@@ -1257,6 +1257,20 @@ function toggleShoppingItem(id){
   renderAll();
   if(firebaseReady) dbWrite(hdb('shoppingList').doc(id).update({done:item.done}));
 }
+/* Checked items clear out overnight, the same day-boundary "reset" reminders use — checking one
+   off at the store marks it done for the rest of that day (strikethrough, sunk to the bottom),
+   then checkDayRollover() deletes it for good once the next day starts. Unlike reminders there's
+   no "due again next time" state to preserve, so this is a real delete, not just hiding a stale
+   completion. Unchecked items are untouched — they're the ones still needed, so they keep
+   persisting indefinitely until someone actually buys them. */
+function clearCheckedShoppingItems(){
+  const doneItems = state.shoppingList.filter(x=>x.done);
+  if(!doneItems.length) return;
+  state.shoppingList = state.shoppingList.filter(x=>!x.done);
+  if(firebaseReady){
+    doneItems.forEach(item=>{ if(!String(item.id).startsWith('local')) dbWrite(hdb('shoppingList').doc(item.id).delete()); });
+  }
+}
 document.getElementById('shoppingAddForm').addEventListener('submit', (e)=>{
   e.preventDefault();
   const input = document.getElementById('shoppingInput');
@@ -1517,6 +1531,7 @@ function checkDayRollover(){
   if(calCursor.getFullYear()===oldToday.getFullYear() && calCursor.getMonth()===oldToday.getMonth()){ calCursor = new Date(); calCursor.setDate(1); }
   lastKnownToday = nowToday;
   subscribeRoutineLog(); subscribeChoreLog();
+  clearCheckedShoppingItems();
   renderAll();
 }
 setInterval(checkDayRollover, 60*1000);
