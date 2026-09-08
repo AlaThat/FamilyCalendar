@@ -460,6 +460,35 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   every reorderable list in the app (family, routines, chores, events, reminders) — only items that
   set `_legacySource` (currently just normalized legacy reminders) are affected; everything else
   behaves exactly as before.
+- `eggLog`: doc id `${dateISO}` → `{date, count}` — one plain running count of eggs collected per
+  calendar day, not tied to any family member (the whole household's chickens, not "whose chore").
+  The doc id being the date itself (same composite-id-as-doc-id convention as `routineLog`/
+  `choreLog`) makes every write a plain upsert via `setEggCount(dateISO, count)`, so correcting a
+  day is identical to logging a new one — no separate "edit history" concept needed.
+
+  **Deliberately lives in Day view, not a fixed "today" widget anywhere else** — a real
+  user-driven decision. The obvious naive design (a counter that only ever edits "today," maybe on
+  the Today or Reminders tab) has a real gap: forgetting to log a day leaves no way to go back and
+  fix it without skewing a later day's tally. Day view already lets you navigate to any date, so a
+  stepper tied to *whichever date Day view is currently showing* (`renderTimeGrid()`'s
+  `eggStepperHtml`, shown only when `dates.length===1`, i.e. never in Week view) gets backdating
+  for free — no separate mechanism, no "editable only if it's recent" special-casing. The stepper
+  sits above the all-day row so it doesn't share space with anything else; +/- buttons call
+  `setEggCount(iso, (state.eggLog[iso]||0) ± 1)`, floored at 0. The running total shown alongside
+  it (`eggTotalForYear()`) sums whatever's in `state.eggLog` whose date falls in the display
+  year — resets naturally every Jan 1 with no stored "year total" field or rollover logic.
+
+  **Month/Week badges deliberately do NOT sit next to the date number/moon icon, even though that
+  would be the obvious spot.** `eggBadge(dateISO)` renders as its own small drawn circle (`.egg-
+  badge`, same non-emoji reasoning as `.moon-icon`) — but positioned in the *opposite* corner from
+  the date number in Month cells (`.cal-cell-top-row`, a flex row with `justify-content:
+  space-between`), and stacked on its own line below the date number in Week/Day headers (relying
+  on `.cal-date-num`'s existing `display:block` to push it down naturally, no extra wrapper
+  needed). This was a deliberate pre-emptive fix, not a bug found after the fact: moon-phase icons
+  only land ~4 days per lunar cycle, but if eggs are logged daily, ALL FOUR of those days will
+  also have an egg count — a near-certain collision every month, not a rare edge case — and the
+  date-number spot was *just* fixed for a real mobile wrapping bug (see the moon-icon note above),
+  so a third thing competing for that same tight spot would have risked reintroducing it.
 - `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly', workEmailTo,
   everyoneColor, everyoneTextColor}`. `everyoneColor`/`everyoneTextColor` (hex strings, default
   `#3A362C`/`#FFFFFF`, same fallback-on-read pattern as the rest of `settings/main`) are the
