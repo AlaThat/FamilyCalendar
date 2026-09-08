@@ -149,6 +149,16 @@ thing you can do first — it will likely surface real bugs that were never actu
   immediately on success, so there's confirmation without needing to find the list. If either
   symptom is reported again on a *new* button added to this flow, check for this same missing
   guard before assuming something else broke.
+- A shared assigned chore's checkbox originally checked off for every assignee at once, not just
+  the person who tapped it — `choreLog` was keyed `${date}_${choreId}` only, with no `memberId`,
+  so two kids sharing one chore had exactly one shared completion entry. Real kid feedback: they
+  each want to check their own box, even on a chore they get shared credit for. Fixed by keying
+  `choreLog` `${date}_${choreId}_${memberId}` instead — matching `routineLog`'s per-member keying,
+  which was already correct — in `subscribeChoreLog()`, the completion lookup in
+  `renderChoreColumns()`, and `toggleChoreDone()` (now takes `(choreId, memberId)`, not just
+  `choreId`). If a "checking one kid's box also checks a sibling's" bug is ever reported again for
+  routines/chores/reminders, check whether the relevant log collection's doc-id key is missing
+  `memberId` before assuming something new broke.
 
 ## Multi-tenancy: households
 
@@ -272,9 +282,16 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   `type==='pool'`, `assignedTo` is unused (`null`), `claimedBy` is a single memberId, and
   `status` tracks the claim lifecycle as before; scheduling fields don't apply to pool chores
   (anyone can grab one any day). For `type==='assigned'`, `assignedTo` is `[memberId]` (can be
-  more than one person, like routines — a shared chore, so any assignee checking it off marks it
-  done for all of them, since assigned chores are unpaid), and scheduling reuses the exact
-  per-person day-of-week machinery built for routines: `scheduleType==='recurring'` chores carry
+  more than one person, like routines — a shared chore both kids see on their own card, unpaid
+  either way), but **each assignee's completion is independent** — checking it off on one kid's
+  card does NOT mark it done on a sibling's. This was a real reported bug, not the original
+  design: `choreLog` originally keyed completion `${date}_${choreId}` only (one shared entry for
+  the whole chore), so any assignee checking it off showed it checked for everyone sharing it —
+  the kids wanted to each check off their own box even on a chore they get shared credit for.
+  Fixed by keying `choreLog` per-member exactly like `routineLog` always did (see below) — a
+  straight architectural correction to match the already-correct routine pattern, not a new
+  concept. Scheduling reuses the exact per-person day-of-week machinery built for routines:
+  `scheduleType==='recurring'` chores carry
   `perMemberDays` and are read through `effectiveDaysForMember(chore, memberId)` exactly like a
   routine; `scheduleType==='once'` chores instead carry a single shared `date` (not per-member —
   a one-time chore happens on one calendar date regardless of who's doing it) and show up only on
@@ -286,13 +303,19 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   chores no longer use `status` for completion — see `choreLog` below — `status` on an assigned
   chore doc is legacy/unused once edited under this scheme, kept around rather than migrated,
   same reasoning as routines' legacy-shape fallback.
-- `choreLog`: doc id `${date}_${choreId}` → `{date, choreId, done}` — per-day completion state
-  for assigned chores, the same reset-every-day pattern as `routineLog`/`recurringReminderLog`.
-  This replaced a real latent bug: before `choreLog` existed, an assigned chore's completion was
-  a permanent field on the chore doc with no daily reset, which would have been badly broken once
-  assigned chores could recur (checking one off Monday would have kept it looking "done" forever,
-  including on Wednesday). Pool chores don't use `choreLog` — their `status`/`claimedBy` lifecycle
-  already isn't a daily thing.
+- `choreLog`: doc id `${date}_${choreId}_${memberId}` → `{date, choreId, memberId, done}` —
+  per-day, per-assignee completion state for assigned chores, the same reset-every-day pattern as
+  `routineLog`/`recurringReminderLog`, and keyed exactly like `routineLog` always was. This
+  replaced two real bugs found at two different times: (1) before `choreLog` existed at all, an
+  assigned chore's completion was a permanent field on the chore doc with no daily reset, which
+  would have been badly broken once assigned chores could recur (checking one off Monday would
+  have kept it looking "done" forever, including on Wednesday); (2) `choreLog` was then keyed
+  `${date}_${choreId}` only — no `memberId` — so a chore shared between two kids had exactly one
+  completion entry for both of them, and either kid checking their own box checked it for the
+  other too. Real kid feedback: each of them wants their own box. Both `subscribeChoreLog()`'s
+  snapshot key and the completion lookup/write in `renderChoreColumns()`/`toggleChoreDone()` now
+  include `memberId`, matching `routineLog`'s per-member keying exactly. Pool chores don't use
+  `choreLog` — their `status`/`claimedBy` lifecycle already isn't a daily thing.
 - `earnings`: `{memberId, amount, title, date, paid}` — one row per completed pool chore
 - `events`: `{title, date, endDate, allDay, startTime, endTime, recurrence:
   'none'|'weekly'|'monthly-date'|'monthly-weekday'|'yearly', weeklyDays, weeklyInterval,
@@ -489,6 +512,34 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   also have an egg count — a near-certain collision every month, not a rare edge case — and the
   date-number spot was *just* fixed for a real mobile wrapping bug (see the moon-icon note above),
   so a third thing competing for that same tight spot would have risked reintroducing it.
+
+  **Stepper bar layout, per user request**: the label no longer carries a 🥚 emoji glyph (plain
+  "Eggs collected" text only, matching the emoji-free `.egg-badge`/`.moon-icon` drawn-icon
+  convention elsewhere in the calendar). "N this year" sits directly next to the label inside a
+  shared `.egg-stepper-label-group` flex child (not on the opposite end of the bar as before), and
+  the −/count/+ controls (`.egg-stepper-controls`) are the single remaining child on the right,
+  pushed to the bar's far edge by the existing `.egg-stepper` `justify-content:space-between`
+  (backed up with `margin-left:auto` on `.egg-stepper-controls` itself, so the controls stay
+  right-aligned even if the bar wraps to a second line on a narrow screen).
+- `shoppingList`: `{text, done, order, createdAt}` — one flat list, no per-item scheduling or
+  assignment. Added per a real request (the user's husband wanted a place to add items that
+  "persist until we check them off when we get them") — the defining behavior that distinguishes
+  this from every other checkbox list in the app is that it does **not** reset daily the way
+  `routineLog`/`choreLog`/`reminderCompletions` do: an item added today is still sitting there,
+  unchecked, next week if nobody's been to the store yet. Checking an item off
+  (`toggleShoppingItem()`) marks `done:true` — rendered with strikethrough and sorted to the
+  bottom of the list (unchecked items first) so what's still needed stays visible while walking
+  the aisles — rather than deleting it immediately. This mirrors the Reminders tab's
+  check-then-separately-delete pattern (a `del-x` ✕ button removes it for good via the shared
+  `removeDoc()`) on purpose: this household has a 3- and 5-year-old, and an accidental tap
+  shouldn't silently and irreversibly drop an item off the list with no undo. The quick-add is a
+  plain `<form>` + text input (`#shoppingAddForm`/`#shoppingInput`) rather than a modal — unlike
+  routines/chores/reminders/events, a shopping item has exactly one field worth entering (its
+  name), so a modal would just be friction for what's meant to be a fast "add it before I forget"
+  action, submittable by Enter as well as tapping "+ Add". There's no reordering UI (no
+  `moveArrowsHtml`/`moveInList` wiring) and no Settings-tab management list the way Reminders got
+  one — nothing about this list is ever unreachable the way a not-currently-due reminder was (see
+  the Settings Reminders-list entry above), so that extra surface isn't needed here.
 - `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly', workEmailTo,
   everyoneColor, everyoneTextColor}`. `everyoneColor`/`everyoneTextColor` (hex strings, default
   `#3A362C`/`#FFFFFF`, same fallback-on-read pattern as the rest of `settings/main`) are the
@@ -651,15 +702,39 @@ real accent colors in the UI; a dark neutral by default (`--everyone`, editable 
 current month/week/day. The "Sign out" control lives at the bottom of the Settings tab instead
 of a header, since there's nowhere else on-screen it belongs.
 
-**Five tabs: Calendar, Today, Chores, Reminders, Settings.** Today is routines-only now — it used
-to also show a person-selector strip and the reminders list, both removed: the person-selector
-strip never actually filtered anything (dead UI), and reminders got their own tab since they're
-conceptually unrelated to routines. Chores leads with "Today's chores" (assigned chores due
-today, same per-member card layout as Today's routines) above the existing "Up for grabs" pool
-and earnings strip — this used to live on the Today tab. Reminders holds the unified reminder
-list (one-time and recurring together, see the `reminders` data-model entry above) and its
-add/reorder controls — originally just manual one-off reminders relocated here unchanged, later
-merged with what had been a separate Settings-only recurring-reminders feature.
+**Six tabs: Calendar, Today, Chores, Reminders, Shopping, Settings.** Today is routines-only now —
+it used to also show a person-selector strip and the reminders list, both removed: the
+person-selector strip never actually filtered anything (dead UI), and reminders got their own tab
+since they're conceptually unrelated to routines. Chores leads with "Today's chores" (assigned
+chores due today, same per-member card layout as Today's routines) above the existing "Up for
+grabs" pool and earnings strip — this used to live on the Today tab. Reminders holds the unified
+reminder list (one-time and recurring together, see the `reminders` data-model entry above) and
+its add/reorder controls — originally just manual one-off reminders relocated here unchanged,
+later merged with what had been a separate Settings-only recurring-reminders feature. Shopping is
+the newest tab, holding the `shoppingList` quick-add + checkable list described above.
+
+**Bottom nav is icon-on-top + small text label below, monochrome line-art icons, not plain text
+tabs** — a deliberate redesign made when the Shopping tab was added, per explicit user go-ahead
+("i don't mind if the bottom tab moves to black/white iconography with small text below it for
+each item"), specifically to buy back horizontal room for a 6th tab without the row feeling
+cramped. Each `nav.tabs button` is now a `flex-direction:column` button containing one inline
+`<svg viewBox="0 0 24 24" stroke="currentColor" fill="none">` icon plus a `<span>` text label —
+`currentColor` means the icon automatically follows the existing active/inactive text color rule
+(`var(--ink-soft)` inactive, `var(--ink)` + the existing top accent border once `.active`) with no
+separate icon-coloring logic needed. Every icon is deliberately built from only straight-line
+primitives (`<line>`, `<rect>`, `<polygon>`, `<circle>` — no bezier/arc path commands) rather than
+borrowed or hand-derived curved icon paths: this sandbox has no way to preview an SVG's actual
+rendered shape before it's screenshotted in Playwright, so a hand-typed curved path risked
+rendering as something broken or unrecognizable with no way to catch it before shipping, the same
+"can't trust it until it's actually been seen rendered" caution this whole file leads with.
+Straight-line shapes are simple enough to reason about correctness directly from the coordinates
+and match the paper-calendar app's already-established "small drawn shape, not a borrowed
+skeuomorphic icon" convention (`.moon-icon`, `.egg-badge`). Settings' icon in particular is a
+deliberately simplified circle-plus-8-spokes stand-in for a gear, not an actual gear-tooth path,
+for the same reason. If a nav icon ever looks wrong/invisible on a real device, check for it
+rendering at all first (a broken `viewBox`/malformed path is the likely culprit) before assuming
+it's a color/sizing issue — `nav.tabs button svg{ width:22px; height:22px; }` fixes the on-screen
+size regardless of the icon's own coordinate scale, so a sizing bug here is unlikely.
 
 ## User context (for tone/scope calibration, not for hardcoding into the app)
 

@@ -41,10 +41,13 @@
   #app{ display:flex; flex-direction:column; height:100vh; height:100dvh; }
 
   /* Bottom nav */
-  nav.tabs{ display:flex; gap:2px; justify-content:space-around; padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  nav.tabs{ display:flex; gap:2px; justify-content:space-around; padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--paper-line); flex-shrink:0; background:var(--paper); position:sticky; bottom:0; z-index:40; }
-  nav.tabs button{ appearance:none; border:none; background:none; cursor:pointer; font-size:13px; padding: 8px 10px;
-    color: var(--ink-soft); border-top: 3px solid transparent; font-weight:600; font-family:inherit; flex:1; }
+  nav.tabs button{ appearance:none; border:none; background:none; cursor:pointer; font-size:10px; padding: 6px 2px 4px;
+    color: var(--ink-soft); border-top: 3px solid transparent; font-weight:600; font-family:inherit; flex:1;
+    display:flex; flex-direction:column; align-items:center; gap:3px; }
+  nav.tabs button svg{ width:22px; height:22px; flex-shrink:0; }
+  nav.tabs button span{ white-space:nowrap; }
   nav.tabs button.active{ color: var(--ink); border-top-color: var(--accent); }
 
   main{ flex:1; overflow-y:auto; padding: 16px 20px 24px; display:flex; flex-direction:column; }
@@ -165,8 +168,9 @@
   /* Egg-count stepper — Day view only. Lives above the all-day row so correcting a day you forgot
      to log is just navigating Day view back to it, same as any other date-scoped data here. */
   .egg-stepper{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:8px 10px; margin-bottom:8px; background:var(--white); border:1px solid var(--paper-line); border-radius:8px; flex-shrink:0; }
+  .egg-stepper-label-group{ display:flex; align-items:baseline; gap:8px; }
   .egg-stepper-label{ font-weight:700; font-size:14px; }
-  .egg-stepper-controls{ display:flex; align-items:center; gap:10px; }
+  .egg-stepper-controls{ display:flex; align-items:center; gap:10px; margin-left:auto; }
   .egg-step-btn{ width:34px; height:34px; border-radius:8px; border:1px solid var(--paper-line); background:var(--paper); font-size:18px; font-weight:700; cursor:pointer; }
   .egg-step-btn:disabled{ opacity:0.35; cursor:default; }
   .egg-stepper-count{ font-family:"Fraunces",serif; font-weight:700; font-size:18px; min-width:24px; text-align:center; display:inline-block; }
@@ -210,6 +214,9 @@
   .list-row .grow{ flex:1; min-width:100px; }
   .small-btn{ border:1px solid var(--paper-line); background:var(--white); border-radius:6px; padding:5px 10px; font-size:13px; cursor:pointer; }
   .add-row-btn{ margin-top:10px; background:none; border:1px dashed var(--ink-soft); border-radius:8px; padding:10px; width:100%; cursor:pointer; font-weight:600; color:var(--ink-soft); font-size:15px; }
+  .quick-add-row{ display:flex; gap:8px; margin-bottom:12px; }
+  .quick-add-row input[type=text]{ flex:1; padding:10px 12px; border:1px solid var(--paper-line); border-radius:8px; font-size:15px; font-family:inherit; background:var(--white); }
+  .quick-add-row button{ flex-shrink:0; }
   .config-warning{ background:#FCEFE4; border:1px solid #E8B98C; border-radius:10px; padding:14px 16px; font-size:14px; margin-bottom:18px; line-height:1.5; }
 
   #toast{ position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:#B5342C; color:white;
@@ -308,6 +315,15 @@
       <div id="reminderList" style="background:var(--white);border:1px solid var(--paper-line);border-radius:var(--radius);padding:6px 16px;"></div>
     </section>
 
+    <section id="tab-shopping" class="hidden">
+      <div class="section-title">Shopping List</div>
+      <form id="shoppingAddForm" class="quick-add-row">
+        <input type="text" id="shoppingInput" placeholder="Add an item…" autocomplete="off">
+        <button type="submit" class="small-btn">+ Add</button>
+      </form>
+      <div id="shoppingListEl" style="background:var(--white);border:1px solid var(--paper-line);border-radius:var(--radius);padding:6px 16px;"></div>
+    </section>
+
     <section id="tab-settings" class="hidden">
       <div class="settings-block">
         <div class="section-title">Family members</div>
@@ -370,11 +386,30 @@
   </main>
 
   <nav class="tabs">
-    <button data-tab="calendar" class="active">Calendar</button>
-    <button data-tab="today">Today</button>
-    <button data-tab="chores">Chores</button>
-    <button data-tab="reminders">Reminders</button>
-    <button data-tab="settings">Settings</button>
+    <button data-tab="calendar" class="active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="16" y1="2" x2="16" y2="6"></line></svg>
+      <span>Calendar</span>
+    </button>
+    <button data-tab="today">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="3" height="3"></rect><rect x="4" y="10.5" width="3" height="3"></rect><rect x="4" y="17" width="3" height="3"></rect><line x1="10" y1="5.5" x2="21" y2="5.5"></line><line x1="10" y1="12" x2="21" y2="12"></line><line x1="10" y1="18.5" x2="21" y2="18.5"></line></svg>
+      <span>Today</span>
+    </button>
+    <button data-tab="chores">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="3" x2="10" y2="12"></line><polygon points="10,12 4,15 8,21 13,15"></polygon><line x1="6.5" y1="16.5" x2="8.5" y2="18.5"></line></svg>
+      <span>Chores</span>
+    </button>
+    <button data-tab="reminders">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12,4 7,16 17,16"></polygon><circle cx="12" cy="19" r="1.5"></circle></svg>
+      <span>Reminders</span>
+    </button>
+    <button data-tab="shopping">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6,8 18,8 16.5,21 7.5,21"></polygon><line x1="9" y1="8" x2="9" y2="5"></line><line x1="9" y1="5" x2="15" y2="5"></line><line x1="15" y1="5" x2="15" y2="8"></line></svg>
+      <span>Shopping</span>
+    </button>
+    <button data-tab="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><line x1="12" y1="3" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="21"></line><line x1="3" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="21" y2="12"></line><line x1="5.6" y1="5.6" x2="7.8" y2="7.8"></line><line x1="16.2" y1="16.2" x2="18.4" y2="18.4"></line><line x1="5.6" y1="18.4" x2="7.8" y2="16.2"></line><line x1="16.2" y1="7.8" x2="18.4" y2="5.6"></line></svg>
+      <span>Settings</span>
+    </button>
   </nav>
 </div>
 
@@ -606,7 +641,7 @@ if(firebaseReady){
 const state = {
   householdId: null,
   family: [], routines: [], routineLog: {}, chores: [], choreLog: {}, earnings: [], events: [], eventExceptions: {}, reminders: [],
-  recurringReminders: [], reminderCompletions: {}, inviteCodes: [], eggLog: {},
+  recurringReminders: [], reminderCompletions: {}, inviteCodes: [], eggLog: {}, shoppingList: [],
   settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '', everyoneColor: '#3A362C', everyoneTextColor: '#FFFFFF' }
 };
 /* Every family's data (family members, routines, events, etc.) lives under
@@ -706,7 +741,7 @@ function subscribeChoreLog(){
   if(unsubChoreLog) unsubChoreLog();
   unsubChoreLog = hdb('choreLog').where('date','==', todayISO()).onSnapshot(snap=>{
     state.choreLog = {};
-    snap.forEach(doc=>{ const d=doc.data(); state.choreLog[`${d.date}_${d.choreId}`]=d.done; });
+    snap.forEach(doc=>{ const d=doc.data(); state.choreLog[`${d.date}_${d.choreId}_${d.memberId}`]=d.done; });
     renderAll();
   });
 }
@@ -734,6 +769,7 @@ function initFirestoreListeners(){
     rows.forEach(r => { state.eggLog[r.date] = r.count; });
     renderAll();
   });
+  watchCollection('shoppingList', rows => { state.shoppingList = rows; renderAll(); });
   subscribeRoutineLog();
   subscribeChoreLog();
   hdb('settings').doc('main').onSnapshot(doc=>{
@@ -1185,6 +1221,49 @@ function toggleReminder(reminderId, due){
   }
 }
 document.getElementById('addReminderBtn').addEventListener('click', ()=> openReminderModal(null));
+
+/* Shopping list — items persist indefinitely (no daily reset like routines/chores) until
+   explicitly checked off at the store. Checking one off marks it done (strikethrough, sorted to
+   the bottom so what's still needed stays visible while shopping) rather than deleting it
+   immediately — same reversible check-then-separately-delete pattern as reminders, chosen because
+   an accidental tap (this household has a 3- and 5-year-old) shouldn't silently lose the item
+   with no way to undo it. */
+function renderShoppingList(){
+  const el = document.getElementById('shoppingListEl');
+  if(!el) return;
+  const items = state.shoppingList.slice().sort((a,b)=> (a.done===b.done) ? (a.order||0)-(b.order||0) : (a.done?1:-1));
+  if(!items.length){ el.innerHTML = '<div class="empty-note">Nothing on the list.</div>'; return; }
+  el.innerHTML = items.map(item => `
+    <div class="reminder-item">
+      <div class="check-btn ${item.done?'done':''}" data-shop-toggle="${item.id}">${item.done?'✓':''}</div>
+      <div class="item-label" style="${item.done?'text-decoration:line-through;color:var(--ink-soft);':''}">${esc(item.text)}</div>
+      <button class="del-x" data-shop-del="${item.id}">✕</button>
+    </div>`).join('');
+  el.querySelectorAll('[data-shop-toggle]').forEach(btn=> btn.addEventListener('click', ()=> toggleShoppingItem(btn.dataset.shopToggle)));
+  el.querySelectorAll('[data-shop-del]').forEach(btn=> btn.addEventListener('click', ()=> removeDoc('shoppingList', btn.dataset.shopDel)));
+}
+function addShoppingItem(text){
+  text = text.trim();
+  if(!text) return;
+  const data = { text, done:false, order: state.shoppingList.length, createdAt: new Date().toISOString() };
+  if(firebaseReady) dbWrite(hdb('shoppingList').add(data));
+  else state.shoppingList.push({ id: uid('local'), ...data });
+  renderAll();
+}
+function toggleShoppingItem(id){
+  const item = state.shoppingList.find(x=>x.id===id);
+  if(!item) return;
+  item.done = !item.done;
+  renderAll();
+  if(firebaseReady) dbWrite(hdb('shoppingList').doc(id).update({done:item.done}));
+}
+document.getElementById('shoppingAddForm').addEventListener('submit', (e)=>{
+  e.preventDefault();
+  const input = document.getElementById('shoppingInput');
+  addShoppingItem(input.value);
+  input.value = '';
+  input.focus();
+});
 const DAY_ABBR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function daysArrayForSchedule(schedule){
   if(schedule === 'weekday') return [1,2,3,4,5];
@@ -1289,22 +1368,26 @@ function renderChoreColumns(){
     const items = assigned.filter(c => (Array.isArray(c.assignedTo) ? c.assignedTo : [c.assignedTo].filter(Boolean)).includes(member.id) && choreAppliesOnDate(c, member.id, today)).sort(byOrder);
     const rows = items.length ? items.map(c => {
       const sharedWith = (Array.isArray(c.assignedTo) ? c.assignedTo : []).filter(id=>id!==member.id).map(id=>memberById(id)?.name).filter(Boolean);
-      const done = !!state.choreLog[`${today}_${c.id}`];
+      // Keyed per member, not just per chore — a shared chore's checkbox used to be one entry
+      // for the whole chore, so any assignee checking it off showed it checked for everyone else
+      // too. Real kid feedback: each of them wants to check off THEIR OWN box, even on a chore
+      // they share credit for. Each assignee's checkbox is now fully independent.
+      const done = !!state.choreLog[`${today}_${c.id}_${member.id}`];
       return `<div class="chore-item">
-        <div class="check-btn ${done?'done':''}" data-chore="${c.id}">${done?'✓':''}</div>
+        <div class="check-btn ${done?'done':''}" data-chore="${c.id}" data-member="${member.id}">${done?'✓':''}</div>
         <div class="item-icon">${esc(c.icon||'🧹')}</div><div class="item-label">${esc(c.title)}${sharedWith.length?` <span style="font-size:12px;color:var(--ink-soft)">(with ${esc(sharedWith.join(', '))})</span>`:''}</div></div>`;
     }).join('') : '<div class="empty-note">Nothing today.</div>';
     return `<div class="member-card" style="border-top-color:${member.color}">
       <h3><span class="dot" style="width:16px;height:16px;background:${member.color}"></span>${esc(member.name)}</h3>${rows}</div>`;
   }).join('');
-  el.querySelectorAll('.check-btn').forEach(btn=> btn.addEventListener('click', ()=> toggleChoreDone(btn.dataset.chore)));
+  el.querySelectorAll('.check-btn').forEach(btn=> btn.addEventListener('click', ()=> toggleChoreDone(btn.dataset.chore, btn.dataset.member)));
 }
-function toggleChoreDone(choreId){
-  const key = `${todayISO()}_${choreId}`;
+function toggleChoreDone(choreId, memberId){
+  const key = `${todayISO()}_${choreId}_${memberId}`;
   const newVal = !state.choreLog[key];
   state.choreLog[key] = newVal;
   renderChoreColumns();
-  if(firebaseReady) dbWrite(hdb('choreLog').doc(key).set({date:todayISO(), choreId, done:newVal}));
+  if(firebaseReady) dbWrite(hdb('choreLog').doc(key).set({date:todayISO(), choreId, memberId, done:newVal}));
 }
 
 /* ============================== CHORES / POOL / EARNINGS ============================== */
@@ -1665,13 +1748,15 @@ function renderTimeGrid(dates){
     const count = state.eggLog[iso] || 0;
     const yearTotal = eggTotalForYear(new Date(iso+'T00:00:00').getFullYear());
     return `<div class="egg-stepper">
-      <span class="egg-stepper-label">🥚 Eggs collected</span>
+      <div class="egg-stepper-label-group">
+        <span class="egg-stepper-label">Eggs collected</span>
+        <span class="egg-stepper-total">${yearTotal} this year</span>
+      </div>
       <div class="egg-stepper-controls">
         <button class="egg-step-btn" id="eggStepDown" ${count<=0?'disabled':''}>−</button>
         <span class="egg-stepper-count">${count}</span>
         <button class="egg-step-btn" id="eggStepUp">+</button>
       </div>
-      <span class="egg-stepper-total">${yearTotal} this year</span>
     </div>`;
   })() : '';
 
@@ -2610,6 +2695,7 @@ function renderAll(){
   renderChoreColumns();
   renderPool();
   renderEarnings();
+  renderShoppingList();
   renderSettings();
   if(!document.getElementById('tab-calendar').classList.contains('hidden')) renderCalendar();
 }
