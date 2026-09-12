@@ -585,6 +585,47 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   focus while typing" bug is ever reported for a *future* live-editable field added to the
   calendar grid, this is the class of bug to check for first — the same guard pattern (skip the
   rebuild while that field has focus) is the fix.
+
+  **Ingredients + a reusable meal library**, added as a real follow-up request. `mealPlan` docs
+  grew an `ingredients: [string]` array alongside `dinner` (legacy docs from before this existed
+  read as `[]` via the same fallback-on-read pattern as the rest of this app). The inline
+  `.meal-input` in the Week-view strip is still there for fast retyping of just the name — it
+  deliberately does NOT touch ingredients (`setMealPlan(dateISO, text)` reads the day's *existing*
+  `ingredients` and re-writes them unchanged, since a plain Firestore `.set()` with only `dinner`
+  would otherwise silently wipe out that day's ingredient list). A separate small
+  `.meal-edit-btn` sits next to each day's input (not layered onto the input's own click, so it
+  never fights the input's own fast type-and-blur flow) — showing the ingredient count once any
+  are set, `+` otherwise, a same-glance signal of which days already have a real plan.
+  `openMealPlanModal(dateISO)` opens the richer editor: meal name, an ingredient list (add/remove
+  lines, edited as a local unsaved `draftIngredients` array — same edit-in-a-draft-then-
+  commit-atomically pattern every other modal in this app uses, so Cancel discards ingredient
+  edits exactly like it discards field edits everywhere else), and a per-ingredient "Add to list"
+  button that calls the shopping list's existing `addShoppingItem()` directly and immediately (not
+  gated behind the modal's own Save) — realistically this is "I'm reviewing the recipe and
+  remembered we're out of pickles," a side-effect action independent of whether the day's plan
+  itself gets saved or cancelled.
+
+  `savedMeals`: `{name, ingredients: [string], createdAt}` — a small reusable recipe library, e.g.
+  "Hamburger Bowls" with its own ingredient list, picked from a `<select>` inside the day modal to
+  copy both the name and ingredients into that day's draft. **This is a copy, never a live link**
+  — deliberately, since the user's own stated use case (this week we're out of pickles, so skip
+  that one ingredient) requires each day's occurrence to diverge freely from the saved recipe
+  without touching it. **Saving to the library is explicit, not automatic**, per direct user
+  choice: a "Save this as a reusable meal" checkbox in the day modal, checked separately from the
+  day's own Save button — auto-saving every named dinner was considered and rejected, since
+  one-off entries like "leftovers" or "takeout" would clutter a list that's only useful when it's
+  just real, repeatable recipes. `saveMealAsReusable(name, ingredients)` upserts by
+  case-insensitive name match rather than always creating a new doc — editing "Hamburger Bowls"'s
+  ingredients (e.g. permanently dropping one) and re-checking the box updates the one canonical
+  saved recipe instead of leaving duplicates behind. Deleting a saved meal (a "Delete" button next
+  to the picker, acting on whichever one is currently selected in it) uses the same generic
+  `removeDoc()` every other list in this app already uses; the picker's own `<option>` list is
+  manually rebuilt right after, since an open modal is a frozen snapshot like every other modal
+  here — it doesn't live-update on its own just because `state.savedMeals` changed underneath it.
+  There's no Settings-tab management surface or reorder UI for saved meals (unlike Reminders) —
+  every saved meal is always reachable from the picker dropdown in any day's modal, so nothing is
+  unreachable the way a not-currently-due reminder used to be; that's the bar this app uses
+  elsewhere for deciding whether a second management surface is actually needed.
 - `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly', workEmailTo,
   everyoneColor, everyoneTextColor}`. `everyoneColor`/`everyoneTextColor` (hex strings, default
   `#3A362C`/`#FFFFFF`, same fallback-on-read pattern as the rest of `settings/main`) are the
