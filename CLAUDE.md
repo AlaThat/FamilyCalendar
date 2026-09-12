@@ -546,6 +546,45 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   `moveArrowsHtml`/`moveInList` wiring) and no Settings-tab management list the way Reminders got
   one — nothing about this list is ever unreachable the way a not-currently-due reminder was (see
   the Settings Reminders-list entry above), so that extra surface isn't needed here.
+- `mealPlan`: doc id `${dateISO}` → `{date, dinner}` — one dinner plan per calendar day, same
+  composite-id-as-doc-id convention as `eggLog`/`routineLog`/`choreLog`, so every write is a
+  plain upsert via `setMealPlan(dateISO, text)`. Dinner-only by design, per the user: breakfast/
+  lunch are routine/always-on-hand and don't need planning, so there's no separate meal-slot field
+  — a second slot can be added later if that ever changes, but it isn't modeled speculatively now.
+  Clearing a box back to empty deletes the doc rather than storing an empty string (`setMealPlan`
+  trims the input first, so whitespace-only counts as empty too) — an empty plan and "no plan set"
+  are the same thing, so there's nothing worth keeping a doc around for.
+
+  **Lives in Week view only** (`renderTimeGrid()`'s `mealRowHtml`, gated on `dates.length > 1` —
+  the opposite condition from the egg stepper's `dates.length === 1`, so the two are mutually
+  exclusive and never both render in the same call), a direct answer to a real "where should this
+  go" design question: Today has no date cursor to browse by, so it can't give "work ahead / look
+  back" for free, while Week view's `weekCursor` prev/next navigation already does — nothing new
+  needed for that. This was chosen explicitly over combining Chores into Routines to free up space
+  on the Today tab, which would have solved a space problem that only exists if meal planning goes
+  into Today at all — since it doesn't, Today/Routines/Chores stay untouched. Seven `.meal-input`
+  text boxes sit in their own `.meal-row`, one per date, reusing the same `.hour-axis-spacer` +
+  flex-column width math as `.allday-row` so they land directly above their matching day column
+  despite being a separate row, not nested inside `.allday-col` itself. Each box saves on the
+  `change` event (fires on blur), not `input` (every keystroke) — both to avoid a Firestore write
+  per character and because a full `renderTimeGrid()` re-render mid-keystroke would fight the
+  guard described next.
+
+  **Real bug caught before shipping, not after**: every Firestore listener in this app calls
+  `renderAll()` on any change, from any source — another household member's device, or this same
+  tab's own write echoing back through its own listener — and `renderAll()` → `renderCalendar()` →
+  `renderTimeGrid()` rebuilds the whole grid's `innerHTML` on every single call. A `.meal-input` is
+  the first thing in this app that lives inside that rebuilt HTML and is directly, continuously
+  editable (events go through a modal instead, never a live in-grid input) — without a guard,
+  anyone mid-typing a dinner plan could have their keystrokes and focus wiped out by a completely
+  unrelated update elsewhere in the household (e.g. a kid checking off a chore on another device).
+  `renderTimeGrid()` now returns immediately, before touching `innerHTML` at all, whenever
+  `document.activeElement` is a `.meal-input` — the grid simply doesn't visually update while
+  someone's actively editing a dinner box; it catches up on the next render once they blur (which
+  is also the moment the value actually saves). If a similar "typed text disappeared" or "lost
+  focus while typing" bug is ever reported for a *future* live-editable field added to the
+  calendar grid, this is the class of bug to check for first — the same guard pattern (skip the
+  rebuild while that field has focus) is the fix.
 - `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly', workEmailTo,
   everyoneColor, everyoneTextColor}`. `everyoneColor`/`everyoneTextColor` (hex strings, default
   `#3A362C`/`#FFFFFF`, same fallback-on-read pattern as the rest of `settings/main`) are the

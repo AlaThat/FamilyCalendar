@@ -175,6 +175,15 @@
   .egg-step-btn:disabled{ opacity:0.35; cursor:default; }
   .egg-stepper-count{ font-family:"Fraunces",serif; font-weight:700; font-size:18px; min-width:24px; text-align:center; display:inline-block; }
   .egg-stepper-total{ font-size:12px; color:var(--ink-soft); font-weight:600; }
+  /* Dinner meal plan — Week view only. Sits above the all-day row using the same
+     hour-axis-spacer + flex-column width math as .allday-row, so the 7 boxes land directly above
+     their matching day column even though this is its own separate row, not part of .allday-row
+     itself. */
+  .meal-row{ display:flex; min-width:0; gap:0; margin-bottom:8px; flex-shrink:0; }
+  .meal-row-label{ font-size:11px; font-weight:700; color:var(--ink-soft); display:flex; align-items:center; }
+  .meal-col{ flex:1; min-width:0; overflow:hidden; padding:0 3px; }
+  .meal-input{ width:100%; box-sizing:border-box; border:1px solid var(--paper-line); border-radius:6px; padding:6px 8px; font-size:12px; font-family:inherit; background:var(--white); color:var(--ink); }
+  .meal-input::placeholder{ color:var(--ink-soft); opacity:0.6; }
 
   .modal-backdrop{ position:fixed; inset:0; background:rgba(44,42,36,0.45); display:flex; align-items:center; justify-content:center; z-index:50; padding:20px; }
   .modal{ background: var(--white); border-radius: 14px; padding:22px; width:100%; max-width:460px; max-height:88vh; overflow-y:auto; }
@@ -641,7 +650,7 @@ if(firebaseReady){
 const state = {
   householdId: null,
   family: [], routines: [], routineLog: {}, chores: [], choreLog: {}, earnings: [], events: [], eventExceptions: {}, reminders: [],
-  recurringReminders: [], reminderCompletions: {}, inviteCodes: [], eggLog: {}, shoppingList: [],
+  recurringReminders: [], reminderCompletions: {}, inviteCodes: [], eggLog: {}, shoppingList: [], mealPlan: {},
   settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '', everyoneColor: '#3A362C', everyoneTextColor: '#FFFFFF' }
 };
 /* Every family's data (family members, routines, events, etc.) lives under
@@ -770,6 +779,11 @@ function initFirestoreListeners(){
     renderAll();
   });
   watchCollection('shoppingList', rows => { state.shoppingList = rows; renderAll(); });
+  watchCollection('mealPlan', rows => {
+    state.mealPlan = {};
+    rows.forEach(r => { state.mealPlan[r.date] = r.dinner; });
+    renderAll();
+  });
   subscribeRoutineLog();
   subscribeChoreLog();
   hdb('settings').doc('main').onSnapshot(doc=>{
@@ -1012,6 +1026,22 @@ function setEggCount(dateISO, count){
   state.eggLog[dateISO] = count;
   renderAll();
   if(firebaseReady) dbWrite(hdb('eggLog').doc(dateISO).set({ date: dateISO, count }));
+}
+/* One dinner plan per calendar day, doc id = the date itself (same composite-id-as-doc-id
+   convention as eggLog/routineLog/choreLog) so every write is a plain upsert. Clearing the field
+   back to empty deletes the doc rather than storing an empty string — an empty plan and "no plan
+   set" are the same thing, so there's no reason to keep a doc around for it. */
+function setMealPlan(dateISO, text){
+  text = text.trim();
+  if(text){
+    state.mealPlan[dateISO] = text;
+    renderAll();
+    if(firebaseReady) dbWrite(hdb('mealPlan').doc(dateISO).set({ date: dateISO, dinner: text }));
+  } else {
+    delete state.mealPlan[dateISO];
+    renderAll();
+    if(firebaseReady) dbWrite(hdb('mealPlan').doc(dateISO).delete());
+  }
 }
 function sortEventsForDisplay(events){
   return events.slice().sort((a,b)=>{
@@ -1730,6 +1760,15 @@ function nowLineHtml(){
    order. Month view is unaffected — it stays the compact multi-week grid it always was. */
 function renderTimeGrid(dates){
   const grid = document.getElementById('calGrid');
+  // Every Firestore listener in this app calls renderAll() on any change, from any household
+  // member's device, including this same tab's own writes echoing back — and renderAll() rebuilds
+  // this whole grid's innerHTML on every call. A .meal-input is the first thing living inside that
+  // rebuilt HTML that's directly, continuously editable (events go through a modal instead), so
+  // without this guard, someone mid-typing a dinner plan could have their keystrokes and focus
+  // wiped out from under them by an unrelated update elsewhere in the household — skip the rebuild
+  // entirely while a meal input has focus; it picks up on the next render once they blur (which is
+  // also when the value actually saves).
+  if(document.activeElement && document.activeElement.classList.contains('meal-input')) return;
   grid.style.gridTemplateColumns = '1fr';
   grid.style.gridTemplateRows = '1fr';
   const showHeaders = dates.length > 1;
@@ -1775,8 +1814,25 @@ function renderTimeGrid(dates){
     </div>`;
   })() : '';
 
+  // Dinner meal plan — Week view only (not Day, which has no "rest of the week" to plan against).
+  // Reuses weekCursor's existing prev/next navigation for "work ahead / look back," the same way
+  // the egg stepper gets backdating for free from Day view's own navigation — no separate browsing
+  // UI needed. One text box per day, aligned under nothing in particular (it sits above the
+  // all-day row, not tied to its columns) but using the same flex-column width math so the 7
+  // boxes still land directly above their matching day header.
+  const mealRowHtml = dates.length > 1 ? (() => {
+    const mealColsHtml = dates.map(iso => `<div class="meal-col">
+      <input type="text" class="meal-input" data-meal-date="${iso}" value="${esc(state.mealPlan[iso]||'')}" placeholder="Dinner…">
+    </div>`).join('');
+    return `<div class="meal-row">
+      <div class="hour-axis-spacer meal-row-label">Dinner</div>
+      ${mealColsHtml}
+    </div>`;
+  })() : '';
+
   grid.innerHTML = `<div class="time-grid-wrap">
     ${eggStepperHtml}
+    ${mealRowHtml}
     <div class="allday-row"><div class="hour-axis-spacer"></div>${alldayColsHtml}</div>
     <div class="time-grid-scroll"><div class="time-grid-inner" style="height:${24*TIME_GRID_HOUR_HEIGHT}px">
       <div class="hour-axis">${hourAxisHtml()}</div>
@@ -1798,6 +1854,7 @@ function renderTimeGrid(dates){
     if(upBtn) upBtn.addEventListener('click', ()=> setEggCount(iso, (state.eggLog[iso]||0) + 1));
     if(downBtn) downBtn.addEventListener('click', ()=> setEggCount(iso, (state.eggLog[iso]||0) - 1));
   }
+  grid.querySelectorAll('.meal-input').forEach(inp=> inp.addEventListener('change', ()=> setMealPlan(inp.dataset.mealDate, inp.value)));
 
   // Always open to the same 5am-ish start rather than drifting with the current time of day —
   // the full 24h grid is still there via scroll for an early flight or a late event.
