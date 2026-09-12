@@ -175,6 +175,20 @@
   .egg-step-btn:disabled{ opacity:0.35; cursor:default; }
   .egg-stepper-count{ font-family:"Fraunces",serif; font-weight:700; font-size:18px; min-width:24px; text-align:center; display:inline-block; }
   .egg-stepper-total{ font-size:12px; color:var(--ink-soft); font-weight:600; }
+  /* Dinner meal plan — Week view only. Sits above the all-day row using the same
+     hour-axis-spacer + flex-column width math as .allday-row, so the 7 boxes land directly above
+     their matching day column even though this is its own separate row, not part of .allday-row
+     itself. */
+  .meal-row{ display:flex; min-width:0; gap:0; margin-bottom:8px; flex-shrink:0; }
+  .meal-row-label{ font-size:11px; font-weight:700; color:var(--ink-soft); display:flex; align-items:center; }
+  .meal-col{ flex:1; min-width:0; overflow:hidden; padding:0 3px; display:flex; gap:2px; align-items:stretch; }
+  .meal-input{ flex:1; min-width:0; box-sizing:border-box; border:1px solid var(--paper-line); border-radius:6px; padding:6px 8px; font-size:12px; font-family:inherit; background:var(--white); color:var(--ink); }
+  .meal-input::placeholder{ color:var(--ink-soft); opacity:0.6; }
+  /* Ingredients/saved-meals entry point — deliberately a separate button below/beside the text
+     input rather than repurposing the input's own click, so it doesn't fight the input's own
+     fast inline retype-and-blur-to-save flow. Shows the ingredient count once any are set (a
+     small at-a-glance signal of which days already have a real plan), "+" otherwise. */
+  .meal-edit-btn{ flex-shrink:0; width:22px; border:1px solid var(--paper-line); border-radius:6px; background:var(--paper); color:var(--ink-soft); font-size:11px; font-weight:700; cursor:pointer; }
 
   .modal-backdrop{ position:fixed; inset:0; background:rgba(44,42,36,0.45); display:flex; align-items:center; justify-content:center; z-index:50; padding:20px; }
   .modal{ background: var(--white); border-radius: 14px; padding:22px; width:100%; max-width:460px; max-height:88vh; overflow-y:auto; }
@@ -641,7 +655,7 @@ if(firebaseReady){
 const state = {
   householdId: null,
   family: [], routines: [], routineLog: {}, chores: [], choreLog: {}, earnings: [], events: [], eventExceptions: {}, reminders: [],
-  recurringReminders: [], reminderCompletions: {}, inviteCodes: [], eggLog: {}, shoppingList: [],
+  recurringReminders: [], reminderCompletions: {}, inviteCodes: [], eggLog: {}, shoppingList: [], mealPlan: {}, savedMeals: [],
   settings: { payPeriodAnchor: null, payPeriodType: 'biweekly', workEmailTo: '', everyoneColor: '#3A362C', everyoneTextColor: '#FFFFFF' }
 };
 /* Every family's data (family members, routines, events, etc.) lives under
@@ -770,6 +784,12 @@ function initFirestoreListeners(){
     renderAll();
   });
   watchCollection('shoppingList', rows => { state.shoppingList = rows; renderAll(); });
+  watchCollection('mealPlan', rows => {
+    state.mealPlan = {};
+    rows.forEach(r => { state.mealPlan[r.date] = { dinner: r.dinner, ingredients: r.ingredients || [] }; });
+    renderAll();
+  });
+  watchCollection('savedMeals', rows => { state.savedMeals = rows; renderAll(); });
   subscribeRoutineLog();
   subscribeChoreLog();
   hdb('settings').doc('main').onSnapshot(doc=>{
@@ -1012,6 +1032,53 @@ function setEggCount(dateISO, count){
   state.eggLog[dateISO] = count;
   renderAll();
   if(firebaseReady) dbWrite(hdb('eggLog').doc(dateISO).set({ date: dateISO, count }));
+}
+/* One dinner plan per calendar day, doc id = the date itself (same composite-id-as-doc-id
+   convention as eggLog/routineLog/choreLog) so every write is a plain upsert. Clearing the field
+   back to empty deletes the doc rather than storing an empty string — an empty plan and "no plan
+   set" are the same thing, so there's no reason to keep a doc around for it. */
+/* Full setter for a day's plan — name AND ingredients together, used by the ingredients modal's
+   Save button. Clearing the name deletes the whole day's plan (name + ingredients), same
+   "empty means no plan" convention as before ingredients existed. */
+function saveMealPlanDay(dateISO, dinner, ingredients){
+  dinner = dinner.trim();
+  ingredients = (ingredients||[]).map(s=>s.trim()).filter(Boolean);
+  if(dinner){
+    state.mealPlan[dateISO] = { dinner, ingredients };
+    renderAll();
+    if(firebaseReady) dbWrite(hdb('mealPlan').doc(dateISO).set({ date: dateISO, dinner, ingredients }));
+  } else {
+    delete state.mealPlan[dateISO];
+    renderAll();
+    if(firebaseReady) dbWrite(hdb('mealPlan').doc(dateISO).delete());
+  }
+}
+/* Quick-edit path for the inline .meal-input box in the Week view strip — updates just the name,
+   preserving whatever ingredients that day already has (a plain .set() here would silently wipe
+   them, since Firestore's set() replaces the whole doc unless every field is re-supplied). */
+function setMealPlan(dateISO, text){
+  saveMealPlanDay(dateISO, text, (state.mealPlan[dateISO]||{}).ingredients || []);
+}
+/* Saving a day's meal as reusable upserts by case-insensitive name match — editing and re-saving
+   "Hamburger Bowls" (e.g. dropping an ingredient one week) updates the one canonical saved recipe
+   rather than creating a duplicate. Explicit save only (not automatic on every named meal), per
+   the user: an auto-saved list would fill up with one-off entries like "leftovers" or "takeout"
+   that are never worth reusing. */
+function saveMealAsReusable(name, ingredients){
+  name = name.trim();
+  if(!name) return;
+  ingredients = (ingredients||[]).map(s=>s.trim()).filter(Boolean);
+  const existing = state.savedMeals.find(m => m.name.trim().toLowerCase() === name.toLowerCase());
+  if(existing){
+    existing.ingredients = ingredients;
+    renderAll();
+    if(firebaseReady) dbWrite(hdb('savedMeals').doc(existing.id).update({ ingredients }));
+  } else {
+    const data = { name, ingredients, createdAt: new Date().toISOString() };
+    if(firebaseReady) dbWrite(hdb('savedMeals').add(data));
+    else state.savedMeals.push({ id: uid('local'), ...data });
+    renderAll();
+  }
 }
 function sortEventsForDisplay(events){
   return events.slice().sort((a,b)=>{
@@ -1730,6 +1797,15 @@ function nowLineHtml(){
    order. Month view is unaffected — it stays the compact multi-week grid it always was. */
 function renderTimeGrid(dates){
   const grid = document.getElementById('calGrid');
+  // Every Firestore listener in this app calls renderAll() on any change, from any household
+  // member's device, including this same tab's own writes echoing back — and renderAll() rebuilds
+  // this whole grid's innerHTML on every call. A .meal-input is the first thing living inside that
+  // rebuilt HTML that's directly, continuously editable (events go through a modal instead), so
+  // without this guard, someone mid-typing a dinner plan could have their keystrokes and focus
+  // wiped out from under them by an unrelated update elsewhere in the household — skip the rebuild
+  // entirely while a meal input has focus; it picks up on the next render once they blur (which is
+  // also when the value actually saves).
+  if(document.activeElement && document.activeElement.classList.contains('meal-input')) return;
   grid.style.gridTemplateColumns = '1fr';
   grid.style.gridTemplateRows = '1fr';
   const showHeaders = dates.length > 1;
@@ -1775,8 +1851,30 @@ function renderTimeGrid(dates){
     </div>`;
   })() : '';
 
+  // Dinner meal plan — Week view only (not Day, which has no "rest of the week" to plan against).
+  // Reuses weekCursor's existing prev/next navigation for "work ahead / look back," the same way
+  // the egg stepper gets backdating for free from Day view's own navigation — no separate browsing
+  // UI needed. One text box per day, aligned under nothing in particular (it sits above the
+  // all-day row, not tied to its columns) but using the same flex-column width math so the 7
+  // boxes still land directly above their matching day header.
+  const mealRowHtml = dates.length > 1 ? (() => {
+    const mealColsHtml = dates.map(iso => {
+      const plan = state.mealPlan[iso];
+      const ingCount = plan && plan.ingredients ? plan.ingredients.length : 0;
+      return `<div class="meal-col">
+        <input type="text" class="meal-input" data-meal-date="${iso}" value="${esc(plan?plan.dinner:'')}" placeholder="Dinner…">
+        <button class="meal-edit-btn" data-meal-edit-date="${iso}" title="Ingredients & saved meals">${ingCount>0?ingCount:'+'}</button>
+      </div>`;
+    }).join('');
+    return `<div class="meal-row">
+      <div class="hour-axis-spacer meal-row-label">Dinner</div>
+      ${mealColsHtml}
+    </div>`;
+  })() : '';
+
   grid.innerHTML = `<div class="time-grid-wrap">
     ${eggStepperHtml}
+    ${mealRowHtml}
     <div class="allday-row"><div class="hour-axis-spacer"></div>${alldayColsHtml}</div>
     <div class="time-grid-scroll"><div class="time-grid-inner" style="height:${24*TIME_GRID_HOUR_HEIGHT}px">
       <div class="hour-axis">${hourAxisHtml()}</div>
@@ -1798,6 +1896,8 @@ function renderTimeGrid(dates){
     if(upBtn) upBtn.addEventListener('click', ()=> setEggCount(iso, (state.eggLog[iso]||0) + 1));
     if(downBtn) downBtn.addEventListener('click', ()=> setEggCount(iso, (state.eggLog[iso]||0) - 1));
   }
+  grid.querySelectorAll('.meal-input').forEach(inp=> inp.addEventListener('change', ()=> setMealPlan(inp.dataset.mealDate, inp.value)));
+  grid.querySelectorAll('.meal-edit-btn').forEach(btn=> btn.addEventListener('click', ()=> openMealPlanModal(btn.dataset.mealEditDate)));
 
   // Always open to the same 5am-ish start rather than drifting with the current time of day —
   // the full 24h grid is still there via scroll for an early flight or a late event.
@@ -2500,6 +2600,108 @@ function openReminderModal(existing){
     renderAll(); closeModal();
   });
   if(isEdit) document.getElementById('remDelete').addEventListener('click', ()=>{ deleteReminder(existing.id); closeModal(); });
+}
+
+/* A day's dinner name still has the fast inline .meal-input in the Week-view strip for quick
+   retyping — this modal is the richer path: an ingredient list, pulling in a Saved Meal (a copy,
+   not a live link, so trimming an ingredient one week never touches the saved recipe), pushing
+   any ingredient straight to the shopping list, and explicitly saving the current name+ingredients
+   as a new/updated Saved Meal. draftIngredients is a local, unsaved-until-Save array — same
+   edit-in-a-draft-then-commit-atomically pattern every other modal in this app already uses
+   (Add/Edit Event, Chore, Routine, Reminder), so a Cancel here discards ingredient edits exactly
+   like it discards field edits everywhere else. */
+function openMealPlanModal(dateISO){
+  const modalRoot = document.getElementById('modalRoot');
+  const plan = state.mealPlan[dateISO];
+  let draftIngredients = plan ? plan.ingredients.slice() : [];
+  const dateLabel = new Date(dateISO+'T00:00:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
+
+  const savedMealOptionsHtml = () => state.savedMeals.slice().sort((a,b)=>a.name.localeCompare(b.name))
+    .map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('');
+
+  modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">
+    <button class="close-x" id="closeModal">✕</button>
+    <h3>Dinner — ${dateLabel}</h3>
+    <div class="field"><label>Meal name</label><input type="text" id="mealNameInput" placeholder="Hamburger Bowls" value="${esc(plan?plan.dinner:'')}"></div>
+    <div class="field"><label>Use a saved meal</label>
+      <div style="display:flex;gap:8px;">
+        <select id="savedMealSelect" style="flex:1;padding:10px;border:1px solid var(--paper-line);border-radius:8px;">
+          <option value="">— pick a saved meal —</option>
+          ${savedMealOptionsHtml()}
+        </select>
+        <button class="small-btn" id="deleteSavedMealBtn" type="button">Delete</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Ingredients</label>
+      <div id="mealIngredientList"></div>
+      <form id="mealIngredientAddForm" class="quick-add-row" style="margin-top:8px;margin-bottom:0;">
+        <input type="text" id="mealIngredientInput" placeholder="Add an ingredient…" autocomplete="off">
+        <button type="submit" class="small-btn">+ Add</button>
+      </form>
+    </div>
+    <div class="checkbox-row"><input type="checkbox" id="mealSaveReusable"><label for="mealSaveReusable">Save this as a reusable meal</label></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="mealPlanSave">Save</button>
+      <button class="btn btn-secondary" id="mealPlanCancel">Cancel</button>
+    </div>
+  </div></div>`;
+
+  function renderIngredientRows(){
+    const el = document.getElementById('mealIngredientList');
+    el.innerHTML = draftIngredients.length ? draftIngredients.map((ing,i)=>`
+      <div class="reminder-item">
+        <div class="item-label">${esc(ing)}</div>
+        <button class="small-btn" data-ing-shop="${i}" type="button">Add to list</button>
+        <button class="del-x" data-ing-del="${i}" type="button">✕</button>
+      </div>`).join('') : '<div class="empty-note">No ingredients yet.</div>';
+    el.querySelectorAll('[data-ing-shop]').forEach(btn=> btn.addEventListener('click', ()=>{
+      const ing = draftIngredients[parseInt(btn.dataset.ingShop,10)];
+      addShoppingItem(ing);
+      showToast(`Added "${ing}" to the shopping list.`);
+    }));
+    el.querySelectorAll('[data-ing-del]').forEach(btn=> btn.addEventListener('click', ()=>{
+      draftIngredients.splice(parseInt(btn.dataset.ingDel,10), 1);
+      renderIngredientRows();
+    }));
+  }
+  renderIngredientRows();
+
+  document.getElementById('closeModal').addEventListener('click', closeModal);
+  document.getElementById('mealPlanCancel').addEventListener('click', closeModal);
+  document.getElementById('backdrop').addEventListener('click', e=>{ if(e.target.id==='backdrop') closeModal(); });
+
+  document.getElementById('mealIngredientAddForm').addEventListener('submit', (e)=>{
+    e.preventDefault();
+    const input = document.getElementById('mealIngredientInput');
+    const val = input.value.trim();
+    if(val){ draftIngredients.push(val); renderIngredientRows(); }
+    input.value = '';
+    input.focus();
+  });
+
+  document.getElementById('savedMealSelect').addEventListener('change', (e)=>{
+    const meal = state.savedMeals.find(m=>m.id===e.target.value);
+    if(!meal) return;
+    document.getElementById('mealNameInput').value = meal.name;
+    draftIngredients = meal.ingredients.slice();
+    renderIngredientRows();
+  });
+  document.getElementById('deleteSavedMealBtn').addEventListener('click', ()=>{
+    const id = document.getElementById('savedMealSelect').value;
+    if(!id){ showToast('Pick a saved meal to delete first.'); return; }
+    removeDoc('savedMeals', id);
+    document.getElementById('savedMealSelect').innerHTML = '<option value="">— pick a saved meal —</option>' + savedMealOptionsHtml();
+  });
+
+  document.getElementById('mealPlanSave').addEventListener('click', ()=>{
+    const name = document.getElementById('mealNameInput').value;
+    saveMealPlanDay(dateISO, name, draftIngredients);
+    if(document.getElementById('mealSaveReusable').checked && name.trim()){
+      saveMealAsReusable(name, draftIngredients);
+    }
+    closeModal();
+  });
 }
 
 /* ============================== SETTINGS ============================== */
