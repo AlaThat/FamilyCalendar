@@ -562,70 +562,77 @@ Playwright tests here; the real flow needs a real Firebase project and a real br
   back" for free, while Week view's `weekCursor` prev/next navigation already does — nothing new
   needed for that. This was chosen explicitly over combining Chores into Routines to free up space
   on the Today tab, which would have solved a space problem that only exists if meal planning goes
-  into Today at all — since it doesn't, Today/Routines/Chores stay untouched. Seven `.meal-input`
-  text boxes sit in their own `.meal-row`, one per date, reusing the same `.hour-axis-spacer` +
+  into Today at all — since it doesn't, Today/Routines/Chores stay untouched. Seven `.meal-box`
+  buttons sit in their own `.meal-row`, one per date, reusing the same `.hour-axis-spacer` +
   flex-column width math as `.allday-row` so they land directly above their matching day column
-  despite being a separate row, not nested inside `.allday-col` itself. Each box saves on the
-  `change` event (fires on blur), not `input` (every keystroke) — both to avoid a Firestore write
-  per character and because a full `renderTimeGrid()` re-render mid-keystroke would fight the
-  guard described next.
+  despite being a separate row, not nested inside `.allday-col` itself.
 
-  **Real bug caught before shipping, not after**: every Firestore listener in this app calls
-  `renderAll()` on any change, from any source — another household member's device, or this same
-  tab's own write echoing back through its own listener — and `renderAll()` → `renderCalendar()` →
-  `renderTimeGrid()` rebuilds the whole grid's `innerHTML` on every single call. A `.meal-input` is
-  the first thing in this app that lives inside that rebuilt HTML and is directly, continuously
-  editable (events go through a modal instead, never a live in-grid input) — without a guard,
-  anyone mid-typing a dinner plan could have their keystrokes and focus wiped out by a completely
-  unrelated update elsewhere in the household (e.g. a kid checking off a chore on another device).
-  `renderTimeGrid()` now returns immediately, before touching `innerHTML` at all, whenever
-  `document.activeElement` is a `.meal-input` — the grid simply doesn't visually update while
-  someone's actively editing a dinner box; it catches up on the next render once they blur (which
-  is also the moment the value actually saves). If a similar "typed text disappeared" or "lost
-  focus while typing" bug is ever reported for a *future* live-editable field added to the
-  calendar grid, this is the class of bug to check for first — the same guard pattern (skip the
-  rebuild while that field has focus) is the fix.
+  **Tapping a day's box always opens the full editor directly — there is no separate inline text
+  field.** An earlier version had both a fast-retype `<input>` in the strip AND a small separate
+  button next to it for ingredients; per direct feedback that was one interactive control too many
+  for what's really one action ("edit this day's plan"), so it collapsed into a single
+  `<button class="meal-box">` per day, showing the dinner name (plus an ingredient count in
+  parens once any are set, e.g. "Hamburger Bowls (2)") or a muted "Dinner…" placeholder when
+  empty — clicking it calls `openMealPlanModal(dateISO)` unconditionally. One side effect worth
+  knowing if this area is ever touched again: this also **removed** a guard that used to sit atop
+  `renderTimeGrid()` (`if(document.activeElement.classList.contains('meal-input')) return;`),
+  added because the old inline input lived inside HTML that `renderAll()` rebuilds on every
+  Firestore change from any household member's device, and a live edit could get its keystrokes
+  wiped mid-type by an unrelated update elsewhere. That risk no longer exists — a `<button>`
+  isn't continuously edited in place, and all real typing now happens inside the modal, which
+  lives in `#modalRoot`, a separate DOM tree `renderAll()` never touches — so the guard was
+  removed as dead code rather than left in place "just in case." If a *future* live-editable field
+  gets added directly inside the calendar grid's rebuilt HTML, this is the exact class of bug
+  (typed text or focus disappearing mid-edit) to watch for again, and the fix is the same pattern:
+  skip the rebuild while that field has focus.
 
   **Ingredients + a reusable meal library**, added as a real follow-up request. `mealPlan` docs
   grew an `ingredients: [string]` array alongside `dinner` (legacy docs from before this existed
-  read as `[]` via the same fallback-on-read pattern as the rest of this app). The inline
-  `.meal-input` in the Week-view strip is still there for fast retyping of just the name — it
-  deliberately does NOT touch ingredients (`setMealPlan(dateISO, text)` reads the day's *existing*
-  `ingredients` and re-writes them unchanged, since a plain Firestore `.set()` with only `dinner`
-  would otherwise silently wipe out that day's ingredient list). A separate small
-  `.meal-edit-btn` sits next to each day's input (not layered onto the input's own click, so it
-  never fights the input's own fast type-and-blur flow) — showing the ingredient count once any
-  are set, `+` otherwise, a same-glance signal of which days already have a real plan.
-  `openMealPlanModal(dateISO)` opens the richer editor: meal name, an ingredient list (add/remove
+  read as `[]` via the same fallback-on-read pattern as the rest of this app). `openMealPlanModal
+  (dateISO)` is the one-time, per-occurrence editor: meal name, an ingredient list (add/remove
   lines, edited as a local unsaved `draftIngredients` array — same edit-in-a-draft-then-
   commit-atomically pattern every other modal in this app uses, so Cancel discards ingredient
-  edits exactly like it discards field edits everywhere else), and a per-ingredient "Add to list"
-  button that calls the shopping list's existing `addShoppingItem()` directly and immediately (not
-  gated behind the modal's own Save) — realistically this is "I'm reviewing the recipe and
-  remembered we're out of pickles," a side-effect action independent of whether the day's plan
-  itself gets saved or cancelled.
+  edits exactly like it discards field edits everywhere else), pulling in a Saved Meal (a copy,
+  not a live link, so subbing potatoes for rice just this week never touches the saved recipe),
+  and a per-ingredient "Add to list" button that calls the shopping list's existing
+  `addShoppingItem()` directly and immediately (not gated behind the modal's own Save) —
+  realistically this is "I'm reviewing the recipe and remembered we're out of pickles," a
+  side-effect action independent of whether the day's plan itself gets saved or cancelled.
+  `saveMealPlanDay(dateISO, dinner, ingredients)` is the single setter behind the modal's Save
+  button — there's no separate quick-edit path anymore now that the strip has no inline input.
 
   `savedMeals`: `{name, ingredients: [string], createdAt}` — a small reusable recipe library, e.g.
   "Hamburger Bowls" with its own ingredient list, picked from a `<select>` inside the day modal to
   copy both the name and ingredients into that day's draft. **This is a copy, never a live link**
-  — deliberately, since the user's own stated use case (this week we're out of pickles, so skip
-  that one ingredient) requires each day's occurrence to diverge freely from the saved recipe
-  without touching it. **Saving to the library is explicit, not automatic**, per direct user
-  choice: a "Save this as a reusable meal" checkbox in the day modal, checked separately from the
-  day's own Save button — auto-saving every named dinner was considered and rejected, since
-  one-off entries like "leftovers" or "takeout" would clutter a list that's only useful when it's
-  just real, repeatable recipes. `saveMealAsReusable(name, ingredients)` upserts by
-  case-insensitive name match rather than always creating a new doc — editing "Hamburger Bowls"'s
-  ingredients (e.g. permanently dropping one) and re-checking the box updates the one canonical
-  saved recipe instead of leaving duplicates behind. Deleting a saved meal (a "Delete" button next
-  to the picker, acting on whichever one is currently selected in it) uses the same generic
-  `removeDoc()` every other list in this app already uses; the picker's own `<option>` list is
-  manually rebuilt right after, since an open modal is a frozen snapshot like every other modal
-  here — it doesn't live-update on its own just because `state.savedMeals` changed underneath it.
-  There's no Settings-tab management surface or reorder UI for saved meals (unlike Reminders) —
-  every saved meal is always reachable from the picker dropdown in any day's modal, so nothing is
-  unreachable the way a not-currently-due reminder used to be; that's the bar this app uses
-  elsewhere for deciding whether a second management surface is actually needed.
+  — deliberately, since the user's own stated use case (subbing potatoes for rice just one week)
+  requires each day's occurrence to diverge freely from the saved recipe without touching it.
+  **Saving to the library from a day's modal is explicit, not automatic**, per direct user choice:
+  a "Save this as a reusable meal" checkbox, checked separately from the day's own Save button —
+  auto-saving every named dinner was considered and rejected, since one-off entries like
+  "leftovers" or "takeout" would clutter a list that's only useful when it's just real, repeatable
+  recipes. `saveMealAsReusable(name, ingredients)` upserts by case-insensitive name match rather
+  than always creating a new doc. Deleting a saved meal from the day modal's picker (a "Delete"
+  button, acting on whichever one is currently selected in it) uses the same generic `removeDoc()`
+  every other list in this app already uses; the picker's own `<option>` list is manually rebuilt
+  right after, since an open modal is a frozen snapshot like every other modal here — it doesn't
+  live-update on its own just because `state.savedMeals` changed underneath it.
+
+  **One-time vs. long-term edits are two deliberately separate surfaces, not one checkbox doing
+  double duty.** A real follow-up request surfaced a gap: from inside a day's own modal, editing
+  the draft (say, swapping rice for potatoes just this week) and then checking "Save this as
+  reusable" would upsert *whatever's currently in the draft* — silently baking that one-time
+  substitution into the permanent recipe right alongside any genuine improvement, with no way to
+  do just one of the two. `openSavedMealEditModal(id)` (Settings → Saved Meals, a
+  `.settings-block` with the same list-row + Edit/Delete pattern as Routines/Chores/Reminders) is
+  the fix: a completely separate editor with no date or day involved at all, writing straight to
+  the `savedMeals` doc (`hdb('savedMeals').doc(id).update({name, ingredients})`). Editing "Hamburger
+  Bowls" here to permanently add red onion can never accidentally pick up whatever a specific
+  day's draft happened to have swapped in — the two edit paths simply never share state. A day
+  that already pulled in the old version of a recipe keeps exactly what it copied at the time;
+  only a *future* "Use a saved meal" pick sees the updated version. There's no reorder UI here
+  (unlike Reminders) — saved meals aren't a scheduled, ordered list the way reminders are, just a
+  flat reference library, so alphabetical (`localeCompare`) is enough with no manual ordering
+  concept needed.
 - `settings/main`: `{payPeriodAnchor, payPeriodType: 'weekly'|'biweekly'|'monthly', workEmailTo,
   everyoneColor, everyoneTextColor}`. `everyoneColor`/`everyoneTextColor` (hex strings, default
   `#3A362C`/`#FFFFFF`, same fallback-on-read pattern as the rest of `settings/main`) are the
